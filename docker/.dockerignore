@@ -1,0 +1,14 @@
+**/node_modules/
+**/.next/
+**/dist/
+**/.turbo/
+.git/
+.env
+.env.*
+*.md
+.docs/
+.vscode/
+.idea/
+coverage/
+test-results/
+playwright-report/

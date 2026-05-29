@@ -1,0 +1,51 @@
+{
+  "name": "@mobster/web",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "clean": "rm -rf .next dist"
+  },
+  "dependencies": {
+    "@mobster/db": "workspace:*",
+    "@mobster/shared": "workspace:*",
+    "@t3-oss/env-nextjs": "^0.10.0",
+    "better-sqlite3": "^11.6.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "drizzle-orm": "^0.36.0",
+    "jose": "^6.2.3",
+    "lucide-react": "^0.460.0",
+    "next": "^15.0.0",
+    "next-auth": "5.0.0-beta.25",
+    "next-themes": "^0.3.0",
+    "octokit": "^4.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.5.0",
+    "uuid": "^14.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@testing-library/jest-dom": "^6.6.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/uuid": "^11.0.0",
+    "autoprefixer": "^10.4.0",
+    "msw": "^2.6.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "vitest": "^2.1.0"
+  }
+}

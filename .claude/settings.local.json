@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx turbo *)",
+      "Bash(mkdir -p /c/Repos/Mobster/apps/web/src/app/api/repos/\\\\[id\\\\]/sync /c/Repos/Mobster/apps/web/src/app/api/issues/\\\\[id\\\\] /c/Repos/Mobster/apps/web/src/app/issues/\\\\[id\\\\] /c/Repos/Mobster/apps/web/src/app/settings /c/Repos/Mobster/apps/web/src/app/inbox /c/Repos/Mobster/apps/web/src/components)",
+      "Bash(npx vitest *)",
+      "Bash(pnpm test *)",
+      "Bash(pnpm build *)",
+      "Bash(pnpm typecheck *)",
+      "Bash(npx drizzle-kit *)",
+      "Bash(rm -rf /c/Repos/Mobster/apps/web/src/app/api/auth/github /c/Repos/Mobster/apps/web/src/app/api/auth/\\\\[...nextauth\\\\] /c/Repos/Mobster/apps/web/src/app/setup /c/Repos/Mobster/apps/web/src/lib/auth.config.ts /c/Repos/Mobster/apps/web/src/lib/auth-types.ts /c/Repos/Mobster/packages/db/src/migrations/0002_fresh_moonstone.sql)",
+      "Bash(pnpm add *)"
+    ],
+    "additionalDirectories": [
+      "C:\\Repos\\Mobster\\apps\\web\\src\\app\\api\\repos\\[id]",
+      "C:\\Repos\\Mobster\\apps\\web\\src\\app\\api\\auth\\[...nextauth]"
+    ]
+  }
+}
