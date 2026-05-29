@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth'
 import { getDb } from '@/lib/db'
-import { issues, githubRepos } from '@mobster/db'
-import { and, eq, like, sql } from 'drizzle-orm'
+import { issues, githubRepos, prdIssues } from '@mobster/db'
+import { and, eq, like, sql, inArray } from 'drizzle-orm'
 import { IssueTable } from '@/components/issue-table'
 import { IssueFilters } from '@/components/issue-filters'
 import { EmptyState } from '@/components/empty-state'
@@ -70,12 +70,21 @@ export default async function InboxPage({ searchParams }: InboxPageProps) {
     .all()
 
   const repoMap = new Map(repos.map((r) => [r.id, r.fullName]))
+
+  // Check which issues are already in a PRD
+  const prdLinks =
+    rows.length > 0
+      ? db.select().from(prdIssues).where(inArray(prdIssues.issueId, rows.map((r) => r.id))).all()
+      : []
+  const prdLinkMap = new Map(prdLinks.map((pl) => [pl.issueId, pl.prdId]))
+
   const enrichedIssues = rows.map((issue) => ({
     ...issue,
     repoFullName: repoMap.get(issue.repoId) ?? 'unknown',
     labels: parseLabels(issue.labels),
     userTags: parseLabels(issue.userTags),
     githubUpdatedAt: issue.githubUpdatedAt ?? issue.githubCreatedAt ?? new Date().toISOString(),
+    prdId: prdLinkMap.get(issue.id) ?? null,
   }))
 
   return (

@@ -77,14 +77,77 @@ export const prds = sqliteTable('prds', {
   content: text('content').notNull(),
   status: text('status')
     .notNull()
-    .$type<'draft' | 'reviewed' | 'approved' | 'scheduled' | 'building' | 'done' | 'failed'>(),
+    .$type<'draft' | 'reviewed' | 'approved' | 'scheduled' | 'building' | 'done' | 'failed' | 'generating'>(),
   agentModel: text('agent_model'),
   agentPrompt: text('agent_prompt'),
   version: integer('version').notNull().default(1),
+  agentId: text('agent_id').references(() => agents.id, { onDelete: 'set null' }),
   parentPrdId: text('parent_prd_id'),
   scheduledAt: text('scheduled_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
+})
+
+// ─── Agents ─────────────────────────────────────────
+
+export const agents = sqliteTable('agents', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  providerType: text('provider_type')
+    .notNull()
+    .$type<'claude-code' | 'anthropic-sdk'>(),
+  apiKeyEncrypted: text('api_key_encrypted').notNull(),
+  baseUrl: text('base_url'),
+  modelOpus: text('model_opus').notNull(),
+  modelSonnet: text('model_sonnet').notNull(),
+  modelHaiku: text('model_haiku').notNull(),
+  extraEnvVars: text('extra_env_vars'),
+  systemPromptTemplate: text('system_prompt_template'),
+  isActive: integer('is_active').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// ─── PRD Issues (junction) ───────────────────────────
+
+export const prdIssues = sqliteTable('prd_issues', {
+  id: text('id').primaryKey(),
+  prdId: text('prd_id')
+    .notNull()
+    .references(() => prds.id, { onDelete: 'cascade' }),
+  issueId: text('issue_id')
+    .notNull()
+    .references(() => issues.id, { onDelete: 'cascade' })
+    .unique(),
+  createdAt: text('created_at').notNull(),
+})
+
+// ─── PRD Comments ────────────────────────────────────
+
+export const prdComments = sqliteTable('prd_comments', {
+  id: text('id').primaryKey(),
+  prdId: text('prd_id')
+    .notNull()
+    .references(() => prds.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
+// ─── Agent Logs ──────────────────────────────────────
+
+export const agentLogs = sqliteTable('agent_logs', {
+  id: text('id').primaryKey(),
+  prdId: text('prd_id')
+    .notNull()
+    .references(() => prds.id, { onDelete: 'cascade' }),
+  agentId: text('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+  sessionId: text('session_id').notNull(),
+  eventType: text('event_type')
+    .notNull()
+    .$type<'thinking' | 'tool_call' | 'tool_result' | 'output' | 'error' | 'status'>(),
+  content: text('content').notNull(),
+  metadata: text('metadata'),
+  createdAt: text('created_at').notNull(),
 })
 
 // ─── Build Jobs ──────────────────────────────────────

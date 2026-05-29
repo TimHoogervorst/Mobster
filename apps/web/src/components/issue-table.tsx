@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { PrdGenerateButton } from './prd-generate-button'
 
 interface IssueRow {
   id: string
@@ -10,6 +11,7 @@ interface IssueRow {
   repoFullName: string
   assignee: string | null
   githubUpdatedAt: string
+  prdId?: string | null
 }
 
 interface IssueTableProps {
@@ -58,6 +60,7 @@ export function IssueTable({ issues }: IssueTableProps) {
             <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
               Updated
             </th>
+            <th className="px-4 py-3 w-8"></th>
           </tr>
         </thead>
         <tbody>
@@ -79,6 +82,14 @@ export function IssueTable({ issues }: IssueTableProps) {
                   <span className="text-muted-foreground">#{issue.number}</span>{' '}
                   {issue.title}
                 </Link>
+                {issue.prdId && (
+                  <Link
+                    href={`/prds/${issue.prdId}`}
+                    className="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 hover:underline"
+                  >
+                    In PRD →
+                  </Link>
+                )}
                 {issue.state === 'closed' && (
                   <span className="ml-2 inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900 dark:text-purple-300">
                     Closed
@@ -110,6 +121,14 @@ export function IssueTable({ issues }: IssueTableProps) {
               </td>
               <td className="px-4 py-3 text-sm text-muted-foreground text-right whitespace-nowrap">
                 {formatDate(issue.githubUpdatedAt)}
+              </td>
+              <td className="px-2 py-3">
+                {!issue.prdId && (
+                  <PrdGenerateButton
+                    issueIds={[issue.id]}
+                    label="PRD"
+                  />
+                )}
               </td>
             </tr>
           ))}

@@ -12,6 +12,7 @@ export const PRD_STATUSES = [
   'building',
   'done',
   'failed',
+  'generating',
 ] as const
 export type PrdStatus = (typeof PRD_STATUSES)[number]
 
@@ -24,10 +25,13 @@ export type IssueState = (typeof ISSUE_STATES)[number]
 export const ISSUE_TYPES = ['bug', 'feature', 'question', 'other'] as const
 export type IssueType = (typeof ISSUE_TYPES)[number]
 
+export const AGENT_PROVIDERS = ['claude-code', 'anthropic-sdk'] as const
+export type AgentProvider = (typeof AGENT_PROVIDERS)[number]
+
 // ─── API Schemas ─────────────────────────────────────
 
 export const PrdGenerateInput = z.object({
-  issueId: z.string().uuid(),
+  issueIds: z.array(z.string().uuid()).min(1).max(10),
 })
 
 export const PrdUpdateInput = z.object({
@@ -38,12 +42,47 @@ export const PrdUpdateInput = z.object({
 
 export const PrdScheduleInput = z.object({
   prdId: z.string().uuid(),
-  scheduledAt: z.string().datetime().optional(), // If omitted, schedule for next 2am
+  scheduledAt: z.string().datetime().optional(),
 })
 
 export const PrdCombineInput = z.object({
   prdIds: z.array(z.string().uuid()).min(2).max(10),
   title: z.string().min(1).max(500),
+})
+
+export const PrdCommentInput = z.object({
+  content: z.string().min(1).max(10000),
+})
+
+export const PrdStatusInput = z.object({
+  status: z.enum(PRD_STATUSES),
+  comment: z.string().max(10000).optional(),
+})
+
+export const AgentCreateInput = z.object({
+  name: z.string().min(1).max(200),
+  providerType: z.enum(AGENT_PROVIDERS),
+  apiKey: z.string().min(1),
+  baseUrl: z.string().url().optional().or(z.literal('')),
+  modelOpus: z.string().min(1),
+  modelSonnet: z.string().min(1),
+  modelHaiku: z.string().min(1),
+  extraEnvVars: z.record(z.string(), z.string()).optional(),
+  systemPromptTemplate: z.string().optional(),
+  isActive: z.boolean().optional(),
+})
+
+export const AgentUpdateInput = z.object({
+  name: z.string().min(1).max(200).optional(),
+  providerType: z.enum(AGENT_PROVIDERS).optional(),
+  apiKey: z.string().min(1).optional(),
+  baseUrl: z.string().url().optional().or(z.literal('')).optional(),
+  modelOpus: z.string().min(1).optional(),
+  modelSonnet: z.string().min(1).optional(),
+  modelHaiku: z.string().min(1).optional(),
+  extraEnvVars: z.record(z.string(), z.string()).optional(),
+  systemPromptTemplate: z.string().optional(),
+  isActive: z.boolean().optional(),
 })
 
 export const IssueUpdateInput = z.object({
@@ -64,5 +103,9 @@ export type PrdGenerateInput = z.infer<typeof PrdGenerateInput>
 export type PrdUpdateInput = z.infer<typeof PrdUpdateInput>
 export type PrdScheduleInput = z.infer<typeof PrdScheduleInput>
 export type PrdCombineInput = z.infer<typeof PrdCombineInput>
+export type PrdCommentInput = z.infer<typeof PrdCommentInput>
+export type PrdStatusInput = z.infer<typeof PrdStatusInput>
+export type AgentCreateInput = z.infer<typeof AgentCreateInput>
+export type AgentUpdateInput = z.infer<typeof AgentUpdateInput>
 export type IssueUpdateInput = z.infer<typeof IssueUpdateInput>
 export type RepoSelectInput = z.infer<typeof RepoSelectInput>

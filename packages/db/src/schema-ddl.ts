@@ -71,11 +71,54 @@ CREATE TABLE IF NOT EXISTS prds (
   status text NOT NULL,
   agent_model text,
   agent_prompt text,
+  agent_id text REFERENCES agents(id) ON DELETE SET NULL,
   version integer DEFAULT 1 NOT NULL,
   parent_prd_id text,
   scheduled_at text,
   created_at text NOT NULL,
   updated_at text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agents (
+  id text PRIMARY KEY NOT NULL,
+  name text NOT NULL,
+  provider_type text NOT NULL,
+  api_key_encrypted text NOT NULL,
+  base_url text,
+  model_opus text NOT NULL,
+  model_sonnet text NOT NULL,
+  model_haiku text NOT NULL,
+  extra_env_vars text,
+  system_prompt_template text,
+  is_active integer DEFAULT 0 NOT NULL,
+  created_at text NOT NULL,
+  updated_at text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS prd_issues (
+  id text PRIMARY KEY NOT NULL,
+  prd_id text NOT NULL REFERENCES prds(id) ON DELETE CASCADE,
+  issue_id text NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  created_at text NOT NULL,
+  UNIQUE(issue_id)
+);
+
+CREATE TABLE IF NOT EXISTS prd_comments (
+  id text PRIMARY KEY NOT NULL,
+  prd_id text NOT NULL REFERENCES prds(id) ON DELETE CASCADE,
+  content text NOT NULL,
+  created_at text NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_logs (
+  id text PRIMARY KEY NOT NULL,
+  prd_id text NOT NULL REFERENCES prds(id) ON DELETE CASCADE,
+  agent_id text REFERENCES agents(id) ON DELETE SET NULL,
+  session_id text NOT NULL,
+  event_type text NOT NULL,
+  content text NOT NULL,
+  metadata text,
+  created_at text NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS build_jobs (
@@ -93,4 +136,8 @@ CREATE TABLE IF NOT EXISTS build_jobs (
   created_at text NOT NULL,
   updated_at text NOT NULL
 );
+
+-- Phase 2 migrations: add columns to existing tables
+-- SQLite doesn't support ADD COLUMN IF NOT EXISTS, so we handle errors in ensureSchema
+ALTER TABLE prds ADD COLUMN agent_id text REFERENCES agents(id) ON DELETE SET NULL;
 `

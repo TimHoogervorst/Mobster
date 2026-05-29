@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { auth } from '@/lib/auth'
 import { getDb } from '@/lib/db'
-import { issues, githubRepos } from '@mobster/db'
+import { issues, githubRepos, prdIssues } from '@mobster/db'
 import { eq } from 'drizzle-orm'
 import { IssueDetail } from '@/components/issue-detail'
 import { EmptyState } from '@/components/empty-state'
@@ -36,6 +36,9 @@ export default async function IssueDetailPage({ params }: IssueDetailPageProps) 
 
   const repo = db.select().from(githubRepos).where(eq(githubRepos.id, issue.repoId)).get()
 
+  // Check if this issue is already in a PRD
+  const prdLink = db.select().from(prdIssues).where(eq(prdIssues.issueId, issue.id)).get()
+
   return (
     <div className="space-y-6">
       {/* Back link */}
@@ -46,6 +49,20 @@ export default async function IssueDetailPage({ params }: IssueDetailPageProps) 
         <ArrowLeft className="h-4 w-4" />
         Back to Inbox
       </Link>
+
+      {prdLink && (
+        <div className="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 dark:bg-indigo-900/30 dark:border-indigo-800">
+          <p className="text-sm">
+            This issue is in{' '}
+            <Link
+              href={`/prds/${prdLink.prdId}`}
+              className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+              a PRD →
+            </Link>
+          </p>
+        </div>
+      )}
 
       <IssueDetail
         issue={{

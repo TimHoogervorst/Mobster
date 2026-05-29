@@ -40,6 +40,9 @@ FROM node:22-alpine AS runner
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
+# Install git for workspace cloning
+RUN apk add --no-cache git
+
 # Create non-root user
 RUN addgroup -g 1001 mobster && \
     adduser -u 1001 -G mobster -s /bin/sh -D mobster
