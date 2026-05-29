@@ -1,8 +1,7 @@
 # 02 — Data Model
 
-**Phase:** 0 (Foundation Setup)  
-**Status:** In Progress  
-**Date:** 2026-05-29
+**Phase:** 0 (Foundation Setup) — **Complete**  
+**Last Updated:** 2026-05-29
 
 ---
 
@@ -10,234 +9,159 @@
 
 - **Driver:** better-sqlite3
 - **File:** `/data/mobster.db` (Docker volume)
-- **Mode:** WAL (Write-Ahead Logging) for concurrent reads
-- **Migrations:** Drizzle Kit, stored in `packages/db/src/migrations/`
+- **Mode:** WAL (Write-Ahead Logging)
+- **Schema setup:** Embedded DDL in `schema-ddl.ts` (no runtime migration files)
 
 ---
 
 ## 2. Entity Relationship Diagram
 
 ```
-User (1) ──── (N) GithubRepo
+app_settings (key-value config)
+users (1) ──── (N) github_repos
                        │
                        │ (N)
                        ▼
-                    Issue (1) ──── (N) PRD (1) ──── (N) BuildJob
-                                                    │
-                                                    │ (N) — if combined
-                                                    ▼
-                                                  PRD (parentPRDId self-ref)
+                    issues (1) ──── (N) prds (1) ──── (N) build_jobs
 ```
 
 ---
 
-## 3. Full Schema
+## 3. Tables
 
-### 3.1 User
+### 3.1 `app_settings`
 
-Stores the single user's GitHub identity and encrypted access token.
+Key-value store for app configuration.
 
-```typescript
-// packages/db/src/schema.ts
+| Column | Type | Purpose |
+|--------|------|---------|
+| `key` | TEXT PK | Setting name |
+| `value` | TEXT | Setting value |
+| `updated_at` | TEXT | ISO 8601 timestamp |
 
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
+**Rows:** `auth_secret`, `encryption_key`, optionally `github_app_id`
 
-export const users = sqliteTable("users", {
-  id: text("id").primaryKey(),                    // UUID
-  githubId: text("github_id").notNull().unique(), // GitHub user ID
-  githubToken: text("github_token").notNull(),     // AES-256-GCM encrypted
-  name: text("name"),                              // GitHub display name
-  email: text("email"),                            // GitHub email
-  avatarUrl: text("avatar_url"),                   // GitHub avatar URL
-  createdAt: text("created_at").notNull(),         // ISO 8601
-  updatedAt: text("updated_at").notNull(),         // ISO 8601
-})
-```
+### 3.2 `users`
 
-### 3.2 GithubRepo
+Stores the single user's GitHub identity and encrypted PAT.
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | TEXT PK | UUID |
+| `github_id` | TEXT UNIQUE | GitHub user ID |
+| `github_token` | TEXT | AES-256-GCM encrypted PAT |
+| `name` | TEXT | GitHub display name |
+| `email` | TEXT | GitHub email |
+| `avatar_url` | TEXT | GitHub avatar URL |
+| `created_at` | TEXT | ISO 8601 |
+| `updated_at` | TEXT | ISO 8601 |
+
+### 3.3 `github_repos`
 
 Repos the user has chosen to sync.
 
-```typescript
-export const githubRepos = sqliteTable("github_repos", {
-  id: text("id").primaryKey(),                    // UUID
-  userId: text("user_id").notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  owner: text("owner").notNull(),                  // e.g. "facebook"
-  name: text("name").notNull(),                    // e.g. "react"
-  fullName: text("full_name").notNull().unique(),  // e.g. "facebook/react"
-  defaultBranch: text("default_branch").notNull().default("main"),
-  description: text("description"),               // Repo description from GitHub
-  language: text("language"),                     // Primary language
-  stars: integer("stars").default(0),
-  syncedAt: text("synced_at"),                    // ISO 8601, last successful sync
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-})
-```
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | TEXT PK | UUID |
+| `user_id` | TEXT FK → users | Owner |
+| `owner` | TEXT | e.g. "facebook" |
+| `name` | TEXT | e.g. "react" |
+| `full_name` | TEXT UNIQUE | e.g. "facebook/react" |
+| `default_branch` | TEXT | Default "main" |
+| `description` | TEXT | From GitHub |
+| `language` | TEXT | Primary language |
+| `stars` | INTEGER | Star count |
+| `synced_at` | TEXT | Last successful sync |
+| `created_at` | TEXT | ISO 8601 |
+| `updated_at` | TEXT | ISO 8601 |
 
-### 3.3 Issue
+### 3.4 `issues`
 
-Cached GitHub issues linked to their repo.
+Cached GitHub issues.
 
-```typescript
-export const issues = sqliteTable("issues", {
-  id: text("id").primaryKey(),                    // UUID (our internal ID)
-  repoId: text("repo_id").notNull()
-    .references(() => githubRepos.id, { onDelete: "cascade" }),
-  githubId: integer("github_id").notNull(),        // GitHub's issue ID
-  number: integer("number").notNull(),             // GitHub issue number (#42)
-  title: text("title").notNull(),
-  body: text("body"),                              // Markdown body
-  state: text("state").notNull()                   // 'open' | 'closed'
-    .$type<"open" | "closed">(),
-  issueType: text("issue_type")                    // 'bug' | 'feature' | 'question' | 'other'
-    .$type<"bug" | "feature" | "question" | "other">(),
-  labels: text("labels"),                          // JSON array: ["bug", "frontend"]
-  assignee: text("assignee"),                      // GitHub username
-  milestone: text("milestone"),                    // Milestone title
-  githubUrl: text("github_url").notNull(),         // https://github.com/owner/repo/issues/42
-  githubCreatedAt: text("github_created_at"),      // Original GitHub timestamp
-  githubUpdatedAt: text("github_updated_at"),      // Last update on GitHub
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | TEXT PK | UUID |
+| `repo_id` | TEXT FK → github_repos | Parent repo |
+| `github_id` | INTEGER | GitHub's issue ID |
+| `number` | INTEGER | Issue number (#42) |
+| `title` | TEXT | Issue title |
+| `body` | TEXT | Markdown body |
+| `state` | TEXT | 'open' or 'closed' |
+| `issue_type` | TEXT | 'bug', 'feature', 'question', 'other' |
+| `labels` | TEXT | JSON array of labels |
+| `assignee` | TEXT | GitHub username |
+| `milestone` | TEXT | Milestone title |
+| `github_url` | TEXT | Link to GitHub issue |
+| `github_created_at` | TEXT | Original timestamp |
+| `github_updated_at` | TEXT | Last GitHub update |
+| `user_notes` | TEXT | Local-only notes |
+| `user_tags` | TEXT | JSON array of local tags |
+| `created_at` | TEXT | ISO 8601 |
+| `updated_at` | TEXT | ISO 8601 |
 
-  // Local-only fields (never pushed to GitHub)
-  userNotes: text("user_notes"),                   // User's local notes
-  userTags: text("user_tags"),                     // JSON array: ["p0", "quick-win"]
+### 3.5 `prds`
 
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-})
-```
+Product Requirement Documents (Phase 2).
 
-### 3.4 PRD
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | TEXT PK | UUID |
+| `issue_id` | TEXT FK → issues | Source issue |
+| `title` | TEXT | PRD title |
+| `content` | TEXT | Markdown content |
+| `status` | TEXT | draft/reviewed/approved/scheduled/building/done/failed |
+| `agent_model` | TEXT | Model used to generate |
+| `agent_prompt` | TEXT | Prompt used |
+| `version` | INTEGER | Edit version |
+| `parent_prd_id` | TEXT | For combined PRDs |
+| `scheduled_at` | TEXT | When scheduled |
+| `created_at` | TEXT | ISO 8601 |
+| `updated_at` | TEXT | ISO 8601 |
 
-Product Requirement Documents generated by the agent.
+### 3.6 `build_jobs`
 
-```typescript
-export const prds = sqliteTable("prds", {
-  id: text("id").primaryKey(),                    // UUID
-  issueId: text("issue_id")
-    .references(() => issues.id, { onDelete: "set null" }),
-  title: text("title").notNull(),
-  content: text("content").notNull(),              // Markdown PRD content
-  status: text("status").notNull()                 // PRD lifecycle
-    .$type<"draft" | "reviewed" | "approved" | "scheduled" | "building" | "done" | "failed">(),
-  agentModel: text("agent_model"),                 // e.g. "claude-sonnet-4-6"
-  agentPrompt: text("agent_prompt"),               // Prompt used to generate
-  version: integer("version").notNull().default(1),
-  parentPrdId: text("parent_prd_id")               // For combined PRDs
-    .references(() => prds.id, { onDelete: "set null" }),
-  scheduledAt: text("scheduled_at"),               // When user clicked "Schedule"
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-})
-```
+Tracks agent code-generation jobs (Phase 3).
 
-### 3.5 BuildJob
-
-Tracks agent code-generation jobs.
-
-```typescript
-export const buildJobs = sqliteTable("build_jobs", {
-  id: text("id").primaryKey(),                    // UUID
-  prdId: text("prd_id").notNull()
-    .references(() => prds.id, { onDelete: "cascade" }),
-  status: text("status").notNull()                 // Job lifecycle
-    .$type<"queued" | "running" | "success" | "failed">(),
-  agentLog: text("agent_log"),                     // Full agent output
-  prUrl: text("pr_url"),                           // GitHub PR URL after success
-  branchName: text("branch_name"),                 // e.g. "mobster/42-fix-login"
-  error: text("error"),                            // Error message if failed
-  retryCount: integer("retry_count").notNull().default(0),
-  maxRetries: integer("max_retries").notNull().default(3),
-  startedAt: text("started_at"),                   // ISO 8601
-  completedAt: text("completed_at"),               // ISO 8601
-  createdAt: text("created_at").notNull(),
-  updatedAt: text("updated_at").notNull(),
-})
-```
-
-### 3.6 Account & Session (NextAuth)
-
-NextAuth.js v5 tables for auth. These are generated by the Drizzle adapter — we'll use the standard schema from `@auth/drizzle-adapter`.
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | TEXT PK | UUID |
+| `prd_id` | TEXT FK → prds | Source PRD |
+| `status` | TEXT | queued/running/success/failed |
+| `agent_log` | TEXT | Full agent output |
+| `pr_url` | TEXT | Created PR URL |
+| `branch_name` | TEXT | Agent's branch |
+| `error` | TEXT | Error details |
+| `retry_count` | INTEGER | Attempts |
+| `max_retries` | INTEGER | Default 3 |
+| `started_at` | TEXT | ISO 8601 |
+| `completed_at` | TEXT | ISO 8601 |
+| `created_at` | TEXT | ISO 8601 |
+| `updated_at` | TEXT | ISO 8601 |
 
 ---
 
-## 4. Indexes
+## 4. State Machines
 
-```sql
--- Fast issue lookup by repo + state
-CREATE INDEX idx_issues_repo_state ON issues(repo_id, state);
-
--- Fast issue lookup by GitHub number (for sync dedup)
-CREATE INDEX idx_issues_repo_github ON issues(repo_id, github_id);
-
--- PRDs by status (for build queue)
-CREATE INDEX idx_prds_status ON prds(status);
-
--- Build jobs by status (for worker polling)
-CREATE INDEX idx_build_jobs_status ON build_jobs(status);
-
--- Build jobs by PRD
-CREATE INDEX idx_build_jobs_prd ON build_jobs(prd_id);
-```
-
----
-
-## 5. State Machines
-
-### 5.1 PRD Status
-
+### PRD Status
 ```
 draft → reviewed → approved → scheduled → building → done
   │        │          │           │           │         │
   └────────┴──────────┴───────────┴───────────┴───→ failed (any stage)
 ```
 
-- **draft:** Agent generated, user hasn't reviewed yet
-- **reviewed:** User has seen it, maybe edited
-- **approved:** User confirms this is ready to build
-- **scheduled:** Queued for overnight build (has `scheduledAt`)
-- **building:** Agent is actively working on it
-- **done:** PR successfully created
-- **failed:** Error occurred (can be retried)
-
-### 5.2 BuildJob Status
-
+### BuildJob Status
 ```
 queued → running → success
   │         │
   └─────────┴──→ failed (retry if retryCount < maxRetries)
-                     │
-                     └──→ queued (reset for retry)
 ```
 
 ---
 
-## 6. Seed Data
+## 5. Schema Updates
 
-For development, we'll seed with:
-- Mock GitHub issues (no real API calls needed)
-- A sample PRD in `draft` status
-- Test data that exercises all status states
-
-See `packages/db/src/seed.ts`.
-
----
-
-## 7. Migration Strategy
-
-1. **Develop:** `drizzle-kit generate` creates SQL migration files
-2. **Apply:** `drizzle-kit migrate` runs pending migrations on startup
-3. **Production:** Migrations run automatically in Docker entrypoint before Next.js starts
-4. **Rollback:** Manual — we'll keep migration files in git and document rollback steps per migration
-
----
-
-## Open Questions
-
-| # | Question | Status |
-|---|----------|--------|
-| 1 | Should `userTags` be a JSON column or a separate `tags` + `issue_tags` join table? | → JSON column is simpler for single-user; resolve during implementation |
-| 2 | Do we need a `Comment` table to cache GitHub issue comments? | → Yes, add in Phase 1 when building sync engine |
-| 3 | Should PRD content support rich text or Markdown only? | → Markdown only (can render to HTML in UI) |
+When the Drizzle schema changes:
+1. Run `cd packages/db && npx drizzle-kit generate`
+2. Copy the generated SQL into `schema-ddl.ts`, wrapping each `CREATE TABLE` with `IF NOT EXISTS`
+3. Migrations are kept in `migrations/` for version history but not used at runtime
