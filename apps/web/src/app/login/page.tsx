@@ -7,7 +7,7 @@ export default async function LoginPage() {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center">
       <div className="w-full max-w-sm space-y-6 rounded-lg border p-8 text-center">
-        <h1 className="text-2xl font-bold">🕵️ Mobster</h1>
+        <h1 className="text-2xl font-bold">Mobster</h1>
 
         {session ? (
           <div className="space-y-4">

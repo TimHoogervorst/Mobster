@@ -1,124 +1,44 @@
 import { auth } from '@/lib/auth'
-import { getDb } from '@/lib/db'
-import { githubRepos, issues } from '@mobster/db'
-import { eq, sql } from 'drizzle-orm'
 import { GithubConnectionStatus } from '@/components/github-connection-status'
-import { RepoSelector } from '@/components/repo-selector'
-import { RepoSyncButton } from '@/components/repo-sync-button'
 import { EmptyState } from '@/components/empty-state'
-import { createGitHubClient } from '@/lib/github'
+import { ThemeToggle } from '@/components/theme-toggle'
 
 export default async function SettingsPage() {
   const session = await auth()
-  const db = getDb()
-
-  // Get connected repos
-  const connectedRepos = db.select().from(githubRepos).all()
-
-  // Get issue counts per repo
-  const repoIssueCounts = new Map<string, number>()
-  for (const repo of connectedRepos) {
-    const count = db
-      .select({ count: sql<number>`count(*)` })
-      .from(issues)
-      .where(eq(issues.repoId, repo.id))
-      .get()
-    repoIssueCounts.set(repo.id, count?.count ?? 0)
-  }
-
-  // Fetch GitHub repos if user is connected
-  let githubReposList: any[] = []
-  if (session?.accessToken) {
-    try {
-      const gh = createGitHubClient(session.accessToken)
-      const repos = await gh.listRepos()
-      githubReposList = repos.map((r) => ({
-        id: r.id,
-        fullName: r.fullName,
-        owner: r.owner,
-        name: r.name,
-        description: r.description,
-        language: r.language,
-        stars: r.stars,
-        connected: connectedRepos.some((cr) => cr.fullName === r.fullName),
-      }))
-    } catch (error) {
-      console.error('Failed to fetch GitHub repos:', error)
-    }
-  }
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground mt-1">
-          Manage your GitHub connection and repository settings.
+          Manage your GitHub connection and app preferences.
         </p>
       </div>
 
       {/* GitHub Connection Status */}
       <GithubConnectionStatus />
 
-      {/* Repository Management */}
-      {session?.accessToken && (
-        <div className="space-y-6">
-          {/* Connected Repos */}
-          <div className="rounded-lg border p-6">
-            <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
-              Connected Repositories ({connectedRepos.length})
-            </h3>
-
-            {connectedRepos.length === 0 ? (
-              <EmptyState
-                icon="📦"
-                title="No repositories connected"
-                description="Connect repositories from the list below to start syncing issues."
-              />
-            ) : (
-              <div className="mt-4 divide-y">
-                {connectedRepos.map((repo) => (
-                  <div
-                    key={repo.id}
-                    className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
-                  >
-                    <div>
-                      <p className="font-medium text-sm">{repo.fullName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {repo.language ?? 'Unknown'} · ⭐ {repo.stars} ·{' '}
-                        {repoIssueCounts.get(repo.id) ?? 0} issues synced
-                      </p>
-                    </div>
-                    <RepoSyncButton
-                      repoId={repo.id}
-                      repoName={repo.fullName}
-                      lastSyncedAt={repo.syncedAt}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Repo Selector */}
-          {githubReposList.length > 0 && (
-            <div className="rounded-lg border p-6">
-              <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-4">
-                Add Repositories
-              </h3>
-              <RepoSelector repos={githubReposList} />
-            </div>
-          )}
-        </div>
-      )}
-
       {!session?.accessToken && (
         <EmptyState
           icon="🔗"
-          title="Connect GitHub to manage repos"
+          title="Connect GitHub to get started"
           description="Enter your Personal Access Token to browse and sync repositories."
           action={{ label: 'Connect GitHub', href: '/login' }}
         />
       )}
+
+      {/* Theme */}
+      <div className="rounded-lg border p-6">
+        <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          Appearance
+        </h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Choose your preferred theme for the app.
+        </p>
+        <div className="mt-3">
+          <ThemeToggle />
+        </div>
+      </div>
     </div>
   )
 }

@@ -61,10 +61,10 @@ export default async function DashboardPage() {
         <div className="mt-8 rounded-lg border p-6 max-w-md">
           <p className="font-medium">No repositories connected yet</p>
           <p className="text-sm text-muted-foreground mt-1">
-            Go to Settings to select which repositories to sync.
+            Go to Repos to select which repositories to sync.
           </p>
           <Link
-            href="/settings"
+            href="/repos"
             className="mt-4 inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           >
             Go to Settings
@@ -90,28 +90,7 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Feature cards */}
-      <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <DashboardCard title="Connect Repos" description="Select repositories to sync and manage." href="/settings" icon="🔗" />
-        <DashboardCard title="Triage Issues" description="Browse, filter, and annotate issues across all connected repos." href="/inbox" icon="📋" />
-        <DashboardCard title="Generate PRDs" description="Let AI draft product requirement documents from issues." href="/prds" icon="🤖" />
-        <DashboardCard title="Schedule Builds" description="Queue PRDs for overnight code generation and wake up to open PRs." href="/jobs" icon="🌙" />
-        <DashboardCard title="Review Code" description="Review AI-generated pull requests with full control before merging." href="/jobs" icon="✅" />
-        <DashboardCard title="Track Progress" description="Monitor issues resolved, PRDs generated, and PRs merged over time." href="/" icon="📊" />
-      </div>
     </div>
-  )
-}
-
-function DashboardCard({
-  title, description, href, icon,
-}: { title: string; description: string; href: string; icon: string }) {
-  return (
-    <Link href={href} className="group rounded-lg border p-6 text-left transition-colors hover:border-primary/50 hover:bg-accent/50">
-      <span className="text-2xl">{icon}</span>
-      <h3 className="mt-3 font-semibold group-hover:text-primary">{title}</h3>
-      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-    </Link>
   )
 }
 

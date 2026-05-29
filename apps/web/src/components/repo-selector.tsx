@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Check, Loader2 } from 'lucide-react'
+import { Search, Check, Loader2, Star } from 'lucide-react'
 
 interface Repo {
   id: number
@@ -144,7 +144,7 @@ export function RepoSelector({ repos }: RepoSelectorProps) {
                 )}
                 <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                   {repo.language && <span>{repo.language}</span>}
-                  <span>⭐ {repo.stars}</span>
+                  <span><Star className="inline h-3 w-3" /> {repo.stars}</span>
                 </div>
               </div>
             </label>

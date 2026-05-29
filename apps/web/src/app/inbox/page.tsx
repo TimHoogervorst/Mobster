@@ -88,8 +88,8 @@ export default async function InboxPage({ searchParams }: InboxPageProps) {
       </div>
       {repos.length === 0 ? (
         <EmptyState icon="📦" title="No repositories synced"
-          description="Go to Settings to connect a repository and sync its issues."
-          action={{ label: 'Go to Settings', href: '/settings' }} />
+          description="Go to Repos to connect a repository and sync its issues."
+          action={{ label: 'Go to Repos', href: '/repos' }} />
       ) : (
         <>
           <IssueFilters repos={repos.map((r) => ({ id: r.id, fullName: r.fullName }))} />
