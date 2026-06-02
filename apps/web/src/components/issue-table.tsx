@@ -1,3 +1,6 @@
+'use client'
+
+import { useState } from 'react'
 import Link from 'next/link'
 import { PrdGenerateButton } from './prd-generate-button'
 
@@ -26,6 +29,28 @@ const TYPE_ICONS: Record<string, string> = {
 }
 
 export function IssueTable({ issues }: IssueTableProps) {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  const eligibleIssues = issues.filter((i) => !i.prdId)
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds)
+    if (next.has(id)) {
+      next.delete(id)
+    } else {
+      next.add(id)
+    }
+    setSelectedIds(next)
+  }
+
+  const toggleAll = () => {
+    if (selectedIds.size === eligibleIssues.length && eligibleIssues.length > 0) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(eligibleIssues.map((i) => i.id)))
+    }
+  }
+
   if (issues.length === 0) {
     return (
       <div className="py-16 text-center">
@@ -42,6 +67,25 @@ export function IssueTable({ issues }: IssueTableProps) {
       <table className="w-full">
         <thead>
           <tr className="border-b bg-muted/50">
+            <th className="px-3 py-3 w-8">
+              <input
+                type="checkbox"
+                checked={
+                  eligibleIssues.length > 0 &&
+                  selectedIds.size === eligibleIssues.length
+                }
+                disabled={eligibleIssues.length === 0}
+                onChange={toggleAll}
+                className="rounded border-input"
+                title={
+                  eligibleIssues.length === 0
+                    ? 'No eligible issues to select'
+                    : selectedIds.size === eligibleIssues.length
+                      ? 'Deselect all'
+                      : 'Select all'
+                }
+              />
+            </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider w-8">
               Type
             </th>
@@ -64,76 +108,114 @@ export function IssueTable({ issues }: IssueTableProps) {
           </tr>
         </thead>
         <tbody>
-          {issues.map((issue) => (
-            <tr
-              key={issue.id}
-              className="border-b hover:bg-accent/50 transition-colors"
-            >
-              <td className="px-4 py-3 text-sm">
-                <span title={issue.issueType ?? 'other'}>
-                  {TYPE_ICONS[issue.issueType ?? 'other'] ?? '📋'}
-                </span>
-              </td>
-              <td className="px-4 py-3">
-                <Link
-                  href={`/issues/${issue.id}`}
-                  className="text-sm font-medium hover:text-primary transition-colors"
-                >
-                  <span className="text-muted-foreground">#{issue.number}</span>{' '}
-                  {issue.title}
-                </Link>
-                {issue.prdId && (
-                  <Link
-                    href={`/prds/${issue.prdId}`}
-                    className="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 hover:underline"
-                  >
-                    In PRD →
-                  </Link>
-                )}
-                {issue.state === 'closed' && (
-                  <span className="ml-2 inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900 dark:text-purple-300">
-                    Closed
+          {issues.map((issue) => {
+            const isSelected = selectedIds.has(issue.id)
+            const isLinked = !!issue.prdId
+
+            return (
+              <tr
+                key={issue.id}
+                className={`border-b hover:bg-accent/50 transition-colors ${
+                  isSelected ? 'bg-accent/30' : ''
+                }`}
+              >
+                <td className="px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    disabled={isLinked}
+                    onChange={() => toggleSelect(issue.id)}
+                    className="rounded border-input disabled:opacity-30 disabled:cursor-not-allowed"
+                    title={
+                      isLinked
+                        ? 'Already in a PRD'
+                        : isSelected
+                          ? 'Deselect issue'
+                          : 'Select issue'
+                    }
+                  />
+                </td>
+                <td className="px-4 py-3 text-sm">
+                  <span title={issue.issueType ?? 'other'}>
+                    {TYPE_ICONS[issue.issueType ?? 'other'] ?? '📋'}
                   </span>
-                )}
-              </td>
-              <td className="px-4 py-3 text-sm text-muted-foreground">
-                {issue.repoFullName}
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex flex-wrap gap-1">
-                  {issue.labels.slice(0, 3).map((label) => (
-                    <span
-                      key={label}
-                      className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
+                </td>
+                <td className="px-4 py-3">
+                  <Link
+                    href={`/issues/${issue.id}`}
+                    className="text-sm font-medium hover:text-primary transition-colors"
+                  >
+                    <span className="text-muted-foreground">
+                      #{issue.number}
+                    </span>{' '}
+                    {issue.title}
+                  </Link>
+                  {issue.prdId && (
+                    <Link
+                      href={`/prds/${issue.prdId}`}
+                      className="ml-2 inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300 hover:underline"
                     >
-                      {label}
-                    </span>
-                  ))}
-                  {issue.labels.length > 3 && (
-                    <span className="text-xs text-muted-foreground">
-                      +{issue.labels.length - 3}
+                      In PRD →
+                    </Link>
+                  )}
+                  {issue.state === 'closed' && (
+                    <span className="ml-2 inline-flex items-center rounded-full bg-purple-100 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900 dark:text-purple-300">
+                      Closed
                     </span>
                   )}
-                </div>
-              </td>
-              <td className="px-4 py-3 text-sm text-muted-foreground">
-                {issue.assignee ?? '—'}
-              </td>
-              <td className="px-4 py-3 text-sm text-muted-foreground text-right whitespace-nowrap">
-                {formatDate(issue.githubUpdatedAt)}
-              </td>
-              <td className="px-2 py-3">
-                {!issue.prdId && (
-                  <PrdGenerateButton
-                    issueIds={[issue.id]}
-                    label="PRD"
-                  />
-                )}
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td className="px-4 py-3 text-sm text-muted-foreground">
+                  {issue.repoFullName}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1">
+                    {issue.labels.slice(0, 3).map((label) => (
+                      <span
+                        key={label}
+                        className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground"
+                      >
+                        {label}
+                      </span>
+                    ))}
+                    {issue.labels.length > 3 && (
+                      <span className="text-xs text-muted-foreground">
+                        +{issue.labels.length - 3}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-sm text-muted-foreground">
+                  {issue.assignee ?? '—'}
+                </td>
+                <td className="px-4 py-3 text-sm text-muted-foreground text-right whitespace-nowrap">
+                  {formatDate(issue.githubUpdatedAt)}
+                </td>
+                <td className="px-2 py-3">
+                  {!issue.prdId && (
+                    <PrdGenerateButton
+                      issueIds={[issue.id]}
+                      label="PRD"
+                    />
+                  )}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
+
+      {/* Bulk action bar */}
+      {selectedIds.size >= 1 && (
+        <div className="border-t bg-muted/30 px-4 py-3 flex items-center justify-between gap-4">
+          <span className="text-sm text-muted-foreground">
+            {selectedIds.size} issue{selectedIds.size !== 1 ? 's' : ''} selected
+          </span>
+          <PrdGenerateButton
+            issueIds={[...selectedIds]}
+            label="Generate PRD"
+          />
+        </div>
+      )}
     </div>
   )
 }
