@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Check, Loader2, Star } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Search, Check, Loader2, Star, Plus, Link } from 'lucide-react'
 
 interface Repo {
   id: number
@@ -19,6 +20,7 @@ interface RepoSelectorProps {
 }
 
 export function RepoSelector({ repos }: RepoSelectorProps) {
+  const router = useRouter()
   const [search, setSearch] = useState('')
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(
     new Set(repos.filter((r) => r.connected).map((r) => r.fullName)),
@@ -26,6 +28,42 @@ export function RepoSelector({ repos }: RepoSelectorProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+
+  // URL-based repo adding
+  const [repoUrl, setRepoUrl] = useState('')
+  const [addingByUrl, setAddingByUrl] = useState(false)
+  const [urlError, setUrlError] = useState<string | null>(null)
+  const [urlSuccess, setUrlSuccess] = useState<string | null>(null)
+
+  const handleAddByUrl = async () => {
+    if (!repoUrl.trim()) return
+
+    setAddingByUrl(true)
+    setUrlError(null)
+    setUrlSuccess(null)
+
+    try {
+      const res = await fetch('/api/repos/add-by-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: repoUrl.trim() }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Failed to add repository')
+      }
+
+      setUrlSuccess(`Added ${data.created.fullName}`)
+      setRepoUrl('')
+      router.refresh()
+    } catch (err: any) {
+      setUrlError(err.message)
+    } finally {
+      setAddingByUrl(false)
+    }
+  }
 
   const filtered = repos.filter((r) =>
     r.fullName.toLowerCase().includes(search.toLowerCase()),
@@ -107,6 +145,54 @@ export function RepoSelector({ repos }: RepoSelectorProps) {
         <p className="text-sm text-green-600">Selection saved successfully.</p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {/* Add repo by URL */}
+      <div className="rounded-md border border-dashed p-4 space-y-2">
+        <p className="text-sm font-medium flex items-center gap-1.5">
+          <Link className="h-4 w-4" />
+          Add a repository by URL
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Paste a GitHub repo URL to add a repository you don&apos;t own.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="https://github.com/owner/repo"
+            value={repoUrl}
+            onChange={(e) => {
+              setRepoUrl(e.target.value)
+              setUrlError(null)
+              setUrlSuccess(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAddByUrl()
+            }}
+            className="flex-1 rounded-md border border-input bg-background py-2 px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <button
+            onClick={handleAddByUrl}
+            disabled={addingByUrl || !repoUrl.trim()}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {addingByUrl ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            {addingByUrl ? 'Adding...' : 'Add'}
+          </button>
+        </div>
+        {urlError && (
+          <p className="text-sm text-destructive">{urlError}</p>
+        )}
+        {urlSuccess && (
+          <p className="text-sm text-green-600 flex items-center gap-1">
+            <Check className="h-3.5 w-3.5" />
+            {urlSuccess}
+          </p>
+        )}
+      </div>
 
       <div className="max-h-96 overflow-y-auto rounded-lg border">
         {filtered.length === 0 ? (

@@ -86,6 +86,25 @@ export function createGitHubClient(accessToken: string) {
     },
 
     /**
+     * Get a single repository by owner and name.
+     * Works for any repo the token has access to (including public repos).
+     */
+    async getRepo(owner: string, repo: string): Promise<GitHubRepo> {
+      const { data } = await octokit.rest.repos.get({ owner, repo })
+      return {
+        id: data.id,
+        owner: data.owner.login,
+        name: data.name,
+        fullName: data.full_name,
+        description: data.description ?? null,
+        language: data.language ?? null,
+        stars: data.stargazers_count ?? 0,
+        defaultBranch: data.default_branch,
+        private: data.private,
+      }
+    },
+
+    /**
      * List issues for a repository.
      * If `since` is provided, only return issues updated after that date (incremental sync).
      */

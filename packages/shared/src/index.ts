@@ -97,6 +97,46 @@ export const RepoSelectInput = z.object({
   fullName: z.string(),
 })
 
+export const AddRepoByUrlInput = z.object({
+  url: z
+    .string()
+    .min(1, 'URL is required')
+    .transform((val, ctx) => {
+      let cleaned = val.trim()
+
+      // Remove protocol prefix
+      cleaned = cleaned.replace(/^https?:\/\//, '')
+
+      // Remove github.com/ prefix
+      cleaned = cleaned.replace(/^github\.com\//, '')
+
+      // Remove trailing .git
+      cleaned = cleaned.replace(/\.git$/, '')
+
+      // Remove trailing slash
+      cleaned = cleaned.replace(/\/$/, '')
+
+      // Remove trailing tree/main, tree/master, etc.
+      cleaned = cleaned.replace(/\/tree\/[^/]+$/, '')
+
+      const parts = cleaned.split('/')
+      if (parts.length !== 2 || !parts[0] || !parts[1]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'Invalid GitHub URL. Expected format: https://github.com/owner/repo',
+        })
+        return z.NEVER
+      }
+
+      return {
+        owner: parts[0],
+        name: parts[1],
+        fullName: `${parts[0]}/${parts[1]}`,
+      }
+    }),
+})
+
 // ─── Type Exports ────────────────────────────────────
 
 export type PrdGenerateInput = z.infer<typeof PrdGenerateInput>
@@ -109,3 +149,4 @@ export type AgentCreateInput = z.infer<typeof AgentCreateInput>
 export type AgentUpdateInput = z.infer<typeof AgentUpdateInput>
 export type IssueUpdateInput = z.infer<typeof IssueUpdateInput>
 export type RepoSelectInput = z.infer<typeof RepoSelectInput>
+export type AddRepoByUrlInput = z.infer<typeof AddRepoByUrlInput>
