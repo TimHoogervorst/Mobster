@@ -105,6 +105,147 @@ export function createGitHubClient(accessToken: string) {
     },
 
     /**
+     * Get the default branch ref (name + HEAD SHA) for a repository.
+     */
+    async getDefaultBranchRef(
+      owner: string,
+      repo: string,
+    ): Promise<{ name: string; sha: string }> {
+      const { data: repoData } = await octokit.rest.repos.get({ owner, repo })
+      const branch = repoData.default_branch
+
+      const { data: refData } = await octokit.rest.git.getRef({
+        owner,
+        repo,
+        ref: `heads/${branch}`,
+      })
+
+      return { name: branch, sha: refData.object.sha }
+    },
+
+    /**
+     * Get a branch ref by name. Returns null if the branch doesn't exist.
+     */
+    async getBranch(
+      owner: string,
+      repo: string,
+      branchName: string,
+    ): Promise<{ name: string; sha: string } | null> {
+      try {
+        const { data } = await octokit.rest.git.getRef({
+          owner,
+          repo,
+          ref: `heads/${branchName}`,
+        })
+        return { name: branchName, sha: data.object.sha }
+      } catch (error: any) {
+        if (error.status === 404) return null
+        throw error
+      }
+    },
+
+    /**
+     * Create a pull request.
+     * If a PR already exists between head and base, returns the existing PR info.
+     */
+    async createPullRequest(
+      owner: string,
+      repo: string,
+      title: string,
+      head: string,
+      base: string,
+      body?: string,
+    ): Promise<{ url: string; number: number }> {
+      try {
+        const { data } = await octokit.rest.pulls.create({
+          owner,
+          repo,
+          title,
+          head,
+          base,
+          body,
+        })
+        return { url: data.html_url, number: data.number }
+      } catch (error: any) {
+        if (error.status === 422) {
+          // PR may already exist — try to find it
+          const { data: existing } = await octokit.rest.pulls.list({
+            owner,
+            repo,
+            head: `${owner}:${head}`,
+            base,
+            state: 'open',
+            per_page: 1,
+          })
+          if (existing.length > 0) {
+            return { url: existing[0]!.html_url, number: existing[0]!.number }
+          }
+        }
+        throw error
+      }
+    },
+
+    /**
+     * Fork a repository. If the user already has a fork, returns the existing one.
+     */
+    async forkRepo(
+      owner: string,
+      repo: string,
+    ): Promise<{ owner: string; name: string; fullName: string }> {
+      try {
+        const { data } = await octokit.rest.repos.createFork({ owner, repo })
+        return {
+          owner: data.owner.login,
+          name: data.name,
+          fullName: data.full_name,
+        }
+      } catch (error: any) {
+        if (error.status === 422 || error.status === 409) {
+          // Fork already exists — look it up
+          const user = await this.getAuthenticatedUser()
+          try {
+            const { data } = await octokit.rest.repos.get({
+              owner: user.login,
+              repo,
+            })
+            if (data.fork && data.parent?.full_name === `${owner}/${repo}`) {
+              return {
+                owner: data.owner.login,
+                name: data.name,
+                fullName: data.full_name,
+              }
+            }
+          } catch {
+            // Fall through to throw
+          }
+        }
+        throw error
+      }
+    },
+
+    /**
+     * Check whether the authenticated user has push access to a repo.
+     */
+    async checkRepoPushAccess(
+      owner: string,
+      repo: string,
+    ): Promise<{ hasPush: boolean; isOwner: boolean }> {
+      const user = await this.getAuthenticatedUser()
+      try {
+        const { data } = await octokit.rest.repos.get({ owner, repo })
+        return {
+          hasPush: data.permissions?.push ?? false,
+          isOwner: data.owner.login.toLowerCase() === user.login.toLowerCase(),
+        }
+      } catch (error: any) {
+        if (error.status === 404) {
+          return { hasPush: false, isOwner: false }
+        }
+        throw error
+      }
+    },
+
+    /**
      * List issues for a repository.
      * If `since` is provided, only return issues updated after that date (incremental sync).
      */

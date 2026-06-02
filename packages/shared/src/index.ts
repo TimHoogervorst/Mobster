@@ -59,6 +59,22 @@ export const PrdStatusInput = z.object({
   comment: z.string().max(10000).optional(),
 })
 
+export const IntegrateInput = z.object({
+  targetType: z.enum(['new-branch', 'existing-branch', 'pull-request']),
+  branchName: z
+    .string()
+    .min(1)
+    .max(200)
+    .regex(/^[a-zA-Z0-9._/-]+$/)
+    .optional(),
+  cleanWorkspace: z
+    .union([z.boolean(), z.string().transform((v) => v === 'true')])
+    .optional(),
+  force: z
+    .union([z.boolean(), z.string().transform((v) => v === 'true')])
+    .optional(),
+})
+
 export const AgentCreateInput = z.object({
   name: z.string().min(1).max(200),
   providerType: z.enum(AGENT_PROVIDERS),
@@ -145,6 +161,7 @@ export type PrdScheduleInput = z.infer<typeof PrdScheduleInput>
 export type PrdCombineInput = z.infer<typeof PrdCombineInput>
 export type PrdCommentInput = z.infer<typeof PrdCommentInput>
 export type PrdStatusInput = z.infer<typeof PrdStatusInput>
+export type IntegrateInput = z.infer<typeof IntegrateInput>
 export type AgentCreateInput = z.infer<typeof AgentCreateInput>
 export type AgentUpdateInput = z.infer<typeof AgentUpdateInput>
 export type IssueUpdateInput = z.infer<typeof IssueUpdateInput>

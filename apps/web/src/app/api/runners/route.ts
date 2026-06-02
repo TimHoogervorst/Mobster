@@ -34,7 +34,7 @@ export async function GET() {
       ? db.select().from(agents).where(eq(agents.id, row.agentId)).get()?.name ?? null
       : null
 
-    const isActive = prd?.status === 'generating'
+    const isActive = prd?.status === 'generating' || prd?.status === 'building'
 
     return {
       sessionId: row.sessionId,

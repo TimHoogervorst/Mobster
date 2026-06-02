@@ -35,7 +35,7 @@ export async function prepareWorkspace(
     await execFileAsync('git', [
       'clone',
       '--mirror',
-      `https://x-access-token:${accessToken}@github.com/${repo.fullName}.git`,
+      `https://${accessToken}@github.com/${repo.fullName}.git`,
       cachePath,
     ], {
       timeout: 120_000, // 2 min timeout for clone

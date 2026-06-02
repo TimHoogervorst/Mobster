@@ -2,14 +2,16 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { auth } from '@/lib/auth'
 import { getDb } from '@/lib/db'
-import { prds, prdIssues, prdComments, issues, githubRepos, agents } from '@mobster/db'
-import { eq, inArray } from 'drizzle-orm'
+import { prds, prdIssues, prdComments, issues, githubRepos, agents, buildJobs } from '@mobster/db'
+import { eq, inArray, desc } from 'drizzle-orm'
 import { PrdViewer } from '@/components/prd-viewer'
 import { PrdComments } from '@/components/prd-comments'
 import { PrdStatusBadge } from '@/components/prd-status-badge'
 import { StatusButton } from './status-button'
+import { IntegrateButton } from './integrate-button'
 import { EmptyState } from '@/components/empty-state'
-import { ArrowLeft, ExternalLink } from 'lucide-react'
+import { ArrowLeft, ExternalLink, GitBranch, GitPullRequest, Hammer } from 'lucide-react'
+import { createGitHubClient } from '@/lib/github'
 
 interface PrdDetailPageProps {
   params: Promise<{ id: string }>
@@ -72,6 +74,41 @@ export default async function PrdDetailPage({ params }: PrdDetailPageProps) {
   const agentName = prd.agentId
     ? db.select().from(agents).where(eq(agents.id, prd.agentId)).get()?.name ?? null
     : null
+
+  // Load build jobs for this PRD (all for history, latest for status)
+  const allBuildJobs = db
+    .select()
+    .from(buildJobs)
+    .where(eq(buildJobs.prdId, id))
+    .orderBy(desc(buildJobs.createdAt))
+    .all()
+
+  const latestBuildJob = allBuildJobs.length > 0 ? allBuildJobs[0] : null
+
+  // Check repo push access
+  let isOwner = true
+  let hasPushAccess = true
+  const repoForAccess = enrichedIssues.length > 0
+    ? db
+        .select()
+        .from(githubRepos)
+        .where(eq(githubRepos.id, linkedIssues[0]?.repoId ?? ''))
+        .get()
+    : null
+
+  if (repoForAccess && session.accessToken) {
+    try {
+      const github = createGitHubClient(session.accessToken)
+      const access = await github.checkRepoPushAccess(repoForAccess.owner, repoForAccess.name)
+      isOwner = access.isOwner
+      hasPushAccess = access.hasPush
+    } catch {
+      // Default to owner (optimistic)
+    }
+  }
+
+  const repoFullName = repoForAccess?.fullName ?? 'unknown'
+  const repoDefaultBranch = repoForAccess?.defaultBranch ?? 'main'
 
   return (
     <div className="space-y-6">
@@ -148,29 +185,221 @@ export default async function PrdDetailPage({ params }: PrdDetailPageProps) {
         </div>
       )}
 
-      {/* Status action buttons */}
+      {/* Status action buttons + Integration */}
       {prd.status === 'draft' && (
         <div className="flex items-center gap-2">
           <StatusButton prdId={prd.id} status="reviewed" label="Mark as Reviewed" />
           <StatusButton prdId={prd.id} status="approved" label="Skip to Approved" />
         </div>
       )}
+
       {prd.status === 'reviewed' && (
-        <StatusButton prdId={prd.id} status="approved" label="Approve PRD" />
-      )}
-      {prd.status === 'approved' && (
-        <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300">
-          ✓ This PRD has been approved and is ready to be scheduled for execution (Phase 3).
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <StatusButton prdId={prd.id} status="approved" label="Approve PRD" />
+            <IntegrateButton
+              prdId={prd.id}
+              prdTitle={prd.title}
+              prdVersion={prd.version}
+              repoFullName={repoFullName}
+              repoDefaultBranch={repoDefaultBranch}
+              isOwner={isOwner}
+              hasPushAccess={hasPushAccess}
+            />
+          </div>
+          {latestBuildJob && (
+            <BuildJobSummary buildJob={latestBuildJob} prdId={prd.id} prdVersion={prd.version} />
+          )}
         </div>
       )}
+
+      {prd.status === 'approved' && (() => {
+        if (!latestBuildJob) {
+          return (
+            <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300 space-y-2">
+              <p>✓ This PRD has been approved and is ready for integration.</p>
+              <IntegrateButton
+                prdId={prd.id} prdTitle={prd.title} prdVersion={prd.version}
+                repoFullName={repoFullName} repoDefaultBranch={repoDefaultBranch}
+                isOwner={isOwner} hasPushAccess={hasPushAccess}
+              />
+            </div>
+          )
+        }
+
+        if (latestBuildJob.status === 'success') {
+          return (
+            <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300 space-y-2">
+              <p className="font-medium">✓ Integration complete</p>
+              <BuildJobSummary buildJob={latestBuildJob} prdId={prd.id} prdVersion={prd.version} />
+              <IntegrateButton
+                prdId={prd.id} prdTitle={prd.title} prdVersion={prd.version}
+                repoFullName={repoFullName} repoDefaultBranch={repoDefaultBranch}
+                isOwner={isOwner} hasPushAccess={hasPushAccess}
+                label="Re-integrate"
+              />
+            </div>
+          )
+        }
+
+        if (latestBuildJob.status === 'failed') {
+          return (
+            <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive space-y-2">
+              <p className="font-medium">✗ Integration failed</p>
+              <p className="text-xs">{latestBuildJob.error || 'Unknown error'}</p>
+              <BuildJobSummary buildJob={latestBuildJob} prdId={prd.id} prdVersion={prd.version} />
+              <IntegrateButton
+                prdId={prd.id} prdTitle={prd.title} prdVersion={prd.version}
+                repoFullName={repoFullName} repoDefaultBranch={repoDefaultBranch}
+                isOwner={isOwner} hasPushAccess={hasPushAccess}
+                label="Retry Integration"
+              />
+            </div>
+          )
+        }
+
+        // Fallback for queued / running / unknown states
+        return (
+          <div className="rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300 space-y-2">
+            <p className="font-medium">Integration status: {latestBuildJob.status}</p>
+            <BuildJobSummary buildJob={latestBuildJob} prdId={prd.id} prdVersion={prd.version} />
+            <IntegrateButton
+              prdId={prd.id} prdTitle={prd.title} prdVersion={prd.version}
+              repoFullName={repoFullName} repoDefaultBranch={repoDefaultBranch}
+              isOwner={isOwner} hasPushAccess={hasPushAccess}
+              label="Re-trigger Integration"
+            />
+          </div>
+        )
+      })()}
+
+      {prd.status === 'building' && (
+        <div className="rounded-md border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 space-y-2">
+          <div className="flex items-center gap-2">
+            <Hammer className="h-4 w-4 animate-pulse" />
+            <span className="font-medium">Integration in progress</span>
+          </div>
+          {latestBuildJob && (
+            <>
+              <p>
+                Branch: <code className="text-xs bg-orange-100 dark:bg-orange-900/50 px-1 rounded">{latestBuildJob.branchName}</code>
+              </p>
+              <Link
+                href={`/runners/build-${prd.id}-v${prd.version}`}
+                className="inline-flex items-center gap-1 text-orange-700 dark:text-orange-300 underline hover:no-underline"
+              >
+                View progress →
+              </Link>
+            </>
+          )}
+          <div className="pt-1">
+            <IntegrateButton
+              prdId={prd.id} prdTitle={prd.title} prdVersion={prd.version}
+              repoFullName={repoFullName} repoDefaultBranch={repoDefaultBranch}
+              isOwner={isOwner} hasPushAccess={hasPushAccess}
+              label="Force Re-integrate"
+            />
+          </div>
+        </div>
+      )}
+
+      {prd.status === 'done' && (
+        <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-300 space-y-2">
+          <p className="font-medium">✓ Integration completed</p>
+          {latestBuildJob && (
+            <BuildJobSummary buildJob={latestBuildJob} prdId={prd.id} prdVersion={prd.version} />
+          )}
+          <IntegrateButton
+            prdId={prd.id}
+            prdTitle={prd.title}
+            prdVersion={prd.version}
+            repoFullName={repoFullName}
+            repoDefaultBranch={repoDefaultBranch}
+            isOwner={isOwner}
+            hasPushAccess={hasPushAccess}
+            label="Re-integrate"
+          />
+        </div>
+      )}
+
       {prd.status === 'failed' && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          PRD generation failed. You may need to check your agent configuration or try again.
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive space-y-2">
+          <p>PRD generation failed. You may need to check your agent configuration or try again.</p>
+          <IntegrateButton
+            prdId={prd.id} prdTitle={prd.title} prdVersion={prd.version}
+            repoFullName={repoFullName} repoDefaultBranch={repoDefaultBranch}
+            isOwner={isOwner} hasPushAccess={hasPushAccess}
+            label="Integrate Anyway"
+          />
         </div>
       )}
 
       {/* PRD Content */}
       <PrdViewer content={prd.content} />
+
+      {/* Test Results */}
+      {latestBuildJob?.status === 'success' && latestBuildJob?.testResults && (
+        <div className="rounded-lg border p-4 space-y-2">
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+            Test Results
+          </h3>
+          <pre className="text-sm bg-muted p-3 rounded-md overflow-x-auto whitespace-pre-wrap max-h-96 overflow-y-auto">
+            {latestBuildJob.testResults}
+          </pre>
+        </div>
+      )}
+
+      {/* Integration History */}
+      {allBuildJobs.length > 1 && (
+        <div className="rounded-lg border p-4 space-y-3">
+          <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+            Integration History ({allBuildJobs.length})
+          </h3>
+          <div className="space-y-2">
+            {allBuildJobs.map((job) => (
+              <div
+                key={job.id}
+                className="flex items-center justify-between text-sm border-b pb-2 last:border-0"
+              >
+                <div>
+                  <span className="font-medium font-mono text-xs">{job.branchName}</span>
+                  <span className="text-muted-foreground ml-2">
+                    {job.status === 'success'
+                      ? '✓'
+                      : job.status === 'failed'
+                        ? '✗'
+                        : job.status === 'running'
+                          ? '…'
+                          : job.status === 'queued'
+                            ? '⏳'
+                            : ''}{' '}
+                    {job.status}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-muted-foreground text-xs">
+                  {job.prUrl && (
+                    <a
+                      href={job.prUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      PR #{job.prUrl.split('/').pop()}
+                    </a>
+                  )}
+                  <Link
+                    href={`/runners/build-${prd.id}-v${prd.version}`}
+                    className="hover:underline"
+                  >
+                    View log →
+                  </Link>
+                  <span>{new Date(job.createdAt).toLocaleDateString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Comments */}
       <PrdComments
@@ -187,6 +416,50 @@ export default async function PrdDetailPage({ params }: PrdDetailPageProps) {
 }
 
 // ─── Helpers ──────────────────────────────────────────
+
+function BuildJobSummary({
+  buildJob,
+  prdId,
+  prdVersion,
+}: {
+  buildJob: {
+    branchName: string | null
+    prUrl: string | null
+    status: string
+    startedAt: string | null
+    completedAt: string | null
+  }
+  prdId: string
+  prdVersion: number
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      {buildJob.branchName && (
+        <span className="inline-flex items-center gap-1">
+          <GitBranch className="h-3 w-3" />
+          <code className="bg-muted px-1 rounded text-xs">{buildJob.branchName}</code>
+        </span>
+      )}
+      {buildJob.prUrl && (
+        <a
+          href={buildJob.prUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-primary hover:underline"
+        >
+          <GitPullRequest className="h-3 w-3" />
+          PR #{buildJob.prUrl.split('/').pop()}
+        </a>
+      )}
+      <Link
+        href={`/runners/build-${prdId}-v${prdVersion}`}
+        className="hover:underline"
+      >
+        View run log →
+      </Link>
+    </div>
+  )
+}
 
 function parseLabels(labels: string | null): string[] {
   if (!labels) return []
