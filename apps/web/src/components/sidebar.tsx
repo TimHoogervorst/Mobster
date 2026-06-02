@@ -11,6 +11,7 @@ import {
   Filter,
   Bot,
   Settings,
+  BookOpen,
   X,
 } from 'lucide-react'
 

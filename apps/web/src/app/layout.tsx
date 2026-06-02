@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
 import { Inter } from 'next/font/google'
 import { ThemeProvider } from 'next-themes'
 import { auth } from '@/lib/auth'
@@ -21,16 +22,23 @@ export default async function RootLayout({
   const session = await auth()
   const isConfigured = !!session?.accessToken
 
+  const headersList = await headers()
+  const isApiDocs = headersList.get('x-is-api-docs') === '1'
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <AppShell
-            user={session?.user ?? null}
-            isConfigured={isConfigured}
-          >
-            {children}
-          </AppShell>
+          {isApiDocs ? (
+            children
+          ) : (
+            <AppShell
+              user={session?.user ?? null}
+              isConfigured={isConfigured}
+            >
+              {children}
+            </AppShell>
+          )}
         </ThemeProvider>
       </body>
     </html>

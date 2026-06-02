@@ -1,14 +1,14 @@
 # Mobster — Master Plan
 
-**Last Updated:** 2026-05-29  
-**Current Phase:** Phase 2 (planned)  
+**Last Updated:** 2026-06-03  
+**Current Phase:** Phase 3 (planned)  
 **License:** AGPL v3
 
 ---
 
 ## Vision
 
-Mobster is a self-hosted Docker-based web application that lets a developer connect their GitHub projects via a Personal Access Token, aggregate all issues & feature requests into a unified inbox, use AI agents to draft PRDs on-demand, review and prioritize them, then schedule them for overnight execution — where the agent writes actual code and opens GitHub PRs for human review.
+Mobster is a self-hosted Docker-based web application that lets a developer connect their GitHub projects via a Personal Access Token, aggregate all issues & feature requests into a unified inbox, use AI agents to draft PRDs on-demand, review and prioritize them, then trigger code integration — where the agent writes actual code, pushes to branches, and opens GitHub PRs for human review.
 
 ### Core Principles
 - **User maintains full control** at every step
@@ -23,20 +23,19 @@ GitHub Repos ──→ Issues/PRs ──→ Unified Inbox (UI)
                                     │
                               [User triages]
                                     │
-                              [Click "Generate PRD"]     ← Phase 2
+                              [Click "Generate PRD"]     ← Phase 2 ✅
                                     │
                               Agent drafts PRD
                                     │
                               [User reviews, edits, combines PRDs]
                                     │
-                              [User clicks "Schedule"]    ← Phase 3
+                              [Click "Integrate"]         ← Phase 2 ✅
                                     │
-                              Build queue ──→ Overnight agent
-                                    │              │
-                                    │       Agent writes code
-                                    │       Agent opens GitHub PR
-                                    │              │
-                              [Morning: User reviews PR] ←─┘
+                              Agent writes code
+                              Agent pushes to branch
+                              Agent opens GitHub PR
+                                    │
+                              [User reviews PR on GitHub]
 ```
 
 ---
@@ -46,11 +45,12 @@ GitHub Repos ──→ Issues/PRs ──→ Unified Inbox (UI)
 | Layer | Choice |
 |-------|--------|
 | Framework | Next.js 15 (App Router) |
-| Database | SQLite (via better-sqlite3 + Drizzle ORM) |
+| Database | SQLite (better-sqlite3 + Drizzle ORM) |
 | Auth | Custom JWT session (jose) + GitHub Personal Access Token |
 | CSS | Tailwind CSS + shadcn/ui |
 | GitHub API | Octokit |
-| Agent SDK | Anthropic SDK + Claude Code CLI (Phase 2+) |
+| Agent SDK | Anthropic SDK + Claude Code CLI |
+| API Docs | Swagger UI (swagger-ui-react) |
 | Testing | Vitest + Playwright |
 | Container | Docker + docker-compose |
 
@@ -58,7 +58,7 @@ GitHub Repos ──→ Issues/PRs ──→ Unified Inbox (UI)
 
 ## Authentication
 
-**No GitHub App or OAuth required.** The user generates a Personal Access Token at `github.com/settings/tokens`, pastes it into Mobster's `/login` page. The token is encrypted (AES-256-GCM) and stored in SQLite. A signed JWT session cookie is set for subsequent requests. No redirect dance, no callback URLs, no token refresh.
+**No GitHub App or OAuth required.** The user generates a Personal Access Token at `github.com/settings/tokens`, pastes it into Mobster's `/login` page. The token is encrypted (AES-256-GCM) and stored in SQLite. A signed JWT session cookie is set for subsequent requests.
 
 ---
 
@@ -74,40 +74,55 @@ GitHub Repos ──→ Issues/PRs ──→ Unified Inbox (UI)
 
 ### Phase 1: GitHub Sync Engine ✅ Complete
 - GitHub PAT entry & validation
-- Repo listing & selection
+- Repo listing & selection (by list or URL)
 - Per-repo manual sync ("Sync Now" button)
 - Label-based issue classification (bug/feature/question/other)
 - Filterable inbox (table with repo, type, state, label, search filters)
 - Issue detail view with local annotations (notes, tags, type override)
+- Multi-issue selection for batch PRD generation
 - Settings page (connection status, repo management)
 
-### Phase 2: PRD Generation 🔜 Planned
-- Claude API integration for PRD generation
-- PRD editor with review/approve workflow
-- PRD combining
+### Phase 2: PRD Generation & Code Integration ✅ Complete
+- **AI Agents**: Configure Claude Code CLI or Anthropic SDK agents with model selection
+- **PRD Generation**: Select issues → agent explores repo workspace → generates 6-section PRD (Summary, Problem, Changes, Technical Changes, Risks, Tests)
+- **PRD Review**: Review/edit/comment workflow with feedback regeneration
+- **PRD Combining**: Merge multiple PRDs into a single combined PRD
+- **Code Integration**: Agent implements code from PRD → commits → pushes to branch → creates GitHub PR
+- **Integration Modes**: New branch (auto-named), existing branch, or pull request into main
+- **Fork Support**: Auto-forks repos the user doesn't own, pushes to fork, opens cross-fork PR
+- **Runner Monitoring**: Real-time agent session logging with structured event viewer (thinking, tool calls, output)
+- **Test Results**: Agent runs test suite after implementation, results displayed on PRD page
+- **Integration History**: Full build job history per PRD with branch, PR link, status
+- **Session Recovery**: Refresh button detects and repairs stuck sessions from process crashes
+- **API Documentation**: Swagger UI at `/api-docs` with full OpenAPI 3.0 spec
+- **Workspace Management**: Bare-mirror cache for fast clones, clean workspace option for retries
 
-### Phase 3: Build Queue & Overnight Execution 🔜 Planned
-- Build queue with scheduling
-- Claude Code CLI for code generation
-- Automatic PR creation
+### Phase 3: UI Redesign & Branding 🔜 Planned
+- Redesign the UI to be more consistent across all pages
+- Add branding materials to make Mobster unique
+- See [03-phase-3-ui-redesign.md](03-phase-3-ui-redesign.md)
 
-### Phase 4: Polish & Release 🔜 Planned
-- Dashboard analytics
-- Dark mode
-- Docker image publication
-- Documentation
+### Phase 4: Performance & Simplification 🔜 Planned
+- Optimize UI and back-end performance
+- Redesign components to be simpler and more maintainable
+- See [04-phase-4-performance.md](04-phase-4-performance.md)
+
+### Phase 5: V1.0 Finalization 🔜 Planned
+- Proper Docker image and compose setup
+- Finalize documentation, testing, and security
+- See [05-v1-finalization.md](05-v1-finalization.md)
 
 ---
 
 ## Data Model
 
-6 tables: `app_settings`, `users`, `github_repos`, `issues`, `prds`, `build_jobs`
+9 tables: `app_settings`, `users`, `github_repos`, `issues`, `prds`, `prd_issues`, `prd_comments`, `agents`, `agent_logs`, `build_jobs`
 
 See [02-data-model.md](02-data-model.md) for full schema details.
 
 ---
 
-## Folder Structure (Current)
+## Folder Structure
 
 ```
 mobster/
@@ -115,20 +130,15 @@ mobster/
 │   ├── 00-master-plan.md           ← This document
 │   ├── 01-architecture.md
 │   ├── 02-data-model.md
-│   ├── 03-api-design.md
-│   ├── 05-ui-ux.md
-│   ├── 07-testing-strategy.md
-│   └── 08-security.md
+│   ├── 03-phase-3-ui-redesign.md   ← Phase 3 plan
+│   ├── 04-phase-4-performance.md   ← Phase 4 plan
+│   ├── 05-v1-finalization.md       ← V1.0 finalization
+│   └── backlog.md                  ← Known issues for investigation
 ├── apps/web/                       ← Next.js application
 │   └── src/
-│       ├── app/                    ← App Router pages
-│       │   ├── login/              ← PAT entry form
-│       │   ├── inbox/              ← Issue table + filters
-│       │   ├── issues/[id]/        ← Issue detail + annotations
-│       │   ├── settings/           ← Repo management + sync
-│       │   └── api/                ← REST endpoints
+│       ├── app/                    ← App Router pages & API routes
 │       ├── components/             ← Shared UI components
-│       └── lib/                    ← Business logic
+│       └── lib/                    ← Business logic (auth, github, agents, sync)
 ├── packages/
 │   ├── shared/                     ← Types, encryption, Zod schemas
 │   └── db/                         ← Drizzle ORM schema, DDL, client
@@ -138,21 +148,11 @@ mobster/
 
 ---
 
-## Open Questions (for Phase 2+)
-
-- Multi-user/tenant data model design
-- Agent context assembly strategy (full repo code vs issue-only)
-- PRD template format
-- Build job concurrency and error handling
-- SaaS pricing model
-
----
-
 ## Related Documents
 
 - [Architecture](01-architecture.md) — Container design, request flows
 - [Data Model](02-data-model.md) — Full schema, state machines
-- [API Design](03-api-design.md) — REST endpoints, error handling
-- [UI/UX](05-ui-ux.md) — Screen designs, component specs
-- [Testing Strategy](07-testing-strategy.md) — Test pyramid, CI
-- [Security](08-security.md) — Threat model, encryption, token handling
+- [Phase 3: UI Redesign](03-phase-3-ui-redesign.md) — Branding & consistency
+- [Phase 4: Performance](04-phase-4-performance.md) — Optimization & simplification
+- [V1.0 Finalization](05-v1-finalization.md) — Docker, docs, testing, security
+- [Backlog](backlog.md) — Known issues for investigation
