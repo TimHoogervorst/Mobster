@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { PrdGenerateButton } from './prd-generate-button'
 
@@ -30,6 +30,11 @@ const TYPE_ICONS: Record<string, string> = {
 
 export function IssueTable({ issues }: IssueTableProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  // Reset selection when the issues array changes (page change / filter change)
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [issues])
 
   const eligibleIssues = issues.filter((i) => !i.prdId)
 
