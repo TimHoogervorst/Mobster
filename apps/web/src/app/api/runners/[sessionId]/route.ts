@@ -42,7 +42,7 @@ export async function GET(
     .orderBy(agentLogs.createdAt)
     .all()
 
-  const isActive = prd?.status === 'generating'
+  const isActive = prd?.status === 'generating' || prd?.status === 'building'
 
   return NextResponse.json({
     session: {

@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db'
 import { agentLogs, prds, agents } from '@mobster/db'
 import { eq, sql } from 'drizzle-orm'
 import { RunnerList } from '@/components/runner-list'
+import { RefreshRunnersButton } from '@/components/refresh-runners-button'
 import { EmptyState } from '@/components/empty-state'
 
 export default async function RunnersPage() {
@@ -50,17 +51,20 @@ export default async function RunnersPage() {
       eventCount: row.eventCount,
       startedAt: row.startedAt,
       lastEventAt: row.lastEventAt,
-      isActive: prd?.status === 'generating',
+      isActive: prd?.status === 'generating' || prd?.status === 'building',
     }
   })
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Runners</h1>
-        <p className="text-muted-foreground mt-1">
-          Monitor active agent sessions and browse generation history.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Runners</h1>
+          <p className="text-muted-foreground mt-1">
+            Monitor active agent sessions and browse generation history.
+          </p>
+        </div>
+        <RefreshRunnersButton />
       </div>
 
       <RunnerList sessions={enriched} />

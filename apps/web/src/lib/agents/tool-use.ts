@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, statSync } from 'fs'
-import { join, resolve, normalize } from 'path'
+import { readFileSync, readdirSync, statSync, mkdirSync, writeFileSync } from 'fs'
+import { join, resolve, normalize, dirname } from 'path'
 
 /**
  * Tool definitions for Anthropic SDK tool-use.
@@ -52,9 +52,27 @@ export const WORKSPACE_TOOLS = [
       required: ['pattern'],
     },
   },
+  {
+    name: 'write_file',
+    description: 'Write content to a file in the repository workspace. Creates parent directories if needed.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Path to the file, relative to the repository root.',
+        },
+        content: {
+          type: 'string',
+          description: 'The content to write to the file.',
+        },
+      },
+      required: ['path', 'content'],
+    },
+  },
 ]
 
-export type WorkspaceToolName = 'read_file' | 'list_directory' | 'search_code'
+export type WorkspaceToolName = 'read_file' | 'list_directory' | 'search_code' | 'write_file'
 
 const MAX_FILE_SIZE = 100_000 // 100KB
 const MAX_DIR_DEPTH = 5
@@ -79,6 +97,8 @@ export function executeWorkspaceTool(
         return listDirectory(input.path as string | undefined, workspaceRoot)
       case 'search_code':
         return searchCode(input.pattern as string, input.path as string | undefined, workspaceRoot)
+      case 'write_file':
+        return writeFile(input.path as string, input.content as string, workspaceRoot)
       default:
         return `Unknown tool: ${toolName}`
     }
@@ -113,6 +133,19 @@ function readFile(relativePath: string | undefined, workspaceRoot: string): stri
     return content.slice(0, MAX_OUTPUT_LENGTH) + `\n\n[... truncated at ${MAX_OUTPUT_LENGTH} chars, full size: ${content.length} chars]`
   }
   return content
+}
+
+function writeFile(relativePath: string | undefined, content: string, workspaceRoot: string): string {
+  if (!relativePath) {
+    return 'Error: path is required for write_file'
+  }
+  const fullPath = safePath(relativePath, workspaceRoot)
+  // Create parent directories if they don't exist
+  mkdirSync(dirname(fullPath), { recursive: true })
+  writeFileSync(fullPath, content, 'utf-8')
+  const size = Buffer.byteLength(content, 'utf-8')
+  const sizeStr = size > 1024 ? `${Math.round(size / 1024)}KB` : `${size}B`
+  return `File written: ${relativePath} (${sizeStr})`
 }
 
 function listDirectory(relativePath: string | undefined, workspaceRoot: string): string {
@@ -167,6 +200,11 @@ function buildTree(dirPath: string, root: string, depth: number): string {
 
 function searchCode(pattern: string, relativePath: string | undefined, workspaceRoot: string): string {
   const searchDir = relativePath ? safePath(relativePath, workspaceRoot) : workspaceRoot
+
+  // Skip grep on Windows — fall back directly to Node.js recursive search
+  if (process.platform === 'win32') {
+    return fallbackSearch(pattern, searchDir, workspaceRoot)
+  }
 
   const { execSync } = require('child_process')
   try {

@@ -166,6 +166,7 @@ export const buildJobs = sqliteTable('build_jobs', {
   error: text('error'),
   retryCount: integer('retry_count').notNull().default(0),
   maxRetries: integer('max_retries').notNull().default(3),
+  testResults: text('test_results'),
   startedAt: text('started_at'),
   completedAt: text('completed_at'),
   createdAt: text('created_at').notNull(),

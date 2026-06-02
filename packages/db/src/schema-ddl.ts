@@ -140,4 +140,5 @@ CREATE TABLE IF NOT EXISTS build_jobs (
 -- Phase 2 migrations: add columns to existing tables
 -- SQLite doesn't support ADD COLUMN IF NOT EXISTS, so we handle errors in ensureSchema
 ALTER TABLE prds ADD COLUMN agent_id text REFERENCES agents(id) ON DELETE SET NULL;
+ALTER TABLE build_jobs ADD COLUMN test_results text;
 `

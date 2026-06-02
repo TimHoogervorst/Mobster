@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Loader2, CheckCircle2, XCircle, ChevronRight } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, ChevronRight, Hammer, FileText } from 'lucide-react'
 
 interface RunnerSession {
   sessionId: string
@@ -18,6 +18,10 @@ interface RunnerSession {
 
 interface RunnerListProps {
   sessions: RunnerSession[]
+}
+
+function isBuildSession(sessionId: string): boolean {
+  return sessionId.startsWith('build-')
 }
 
 export function RunnerList({ sessions }: RunnerListProps) {
@@ -68,6 +72,9 @@ function SessionTable({ sessions, isActive }: { sessions: RunnerSession[]; isAct
         <thead>
           <tr className="border-b bg-muted/50">
             <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Type
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
               PRD
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -88,6 +95,19 @@ function SessionTable({ sessions, isActive }: { sessions: RunnerSession[]; isAct
               key={s.sessionId}
               className="border-b hover:bg-accent/50 transition-colors"
             >
+              <td className="px-4 py-3">
+                {isBuildSession(s.sessionId) ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">
+                    <Hammer className="h-3 w-3" />
+                    Integration
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                    <FileText className="h-3 w-3" />
+                    PRD
+                  </span>
+                )}
+              </td>
               <td className="px-4 py-3">
                 <div className="flex items-center gap-2">
                   {isActive ? (
