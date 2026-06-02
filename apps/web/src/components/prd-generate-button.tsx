@@ -20,7 +20,7 @@ export function PrdGenerateButton({
   const router = useRouter()
 
   const handleGenerate = async () => {
-    if (issueIds.length === 0) return
+    if (!issueIds || issueIds.length === 0) return
 
     setLoading(true)
     setError(null)
@@ -40,6 +40,9 @@ export function PrdGenerateButton({
             `Some issues are already in a PRD: ${data.conflictingIssueIds?.join(', ') ?? 'unknown'}`,
           )
         }
+        if (res.status === 400) {
+          throw new Error(data.error ?? 'Invalid request')
+        }
         throw new Error(data.error ?? 'Failed to generate PRD')
       }
 
@@ -52,11 +55,13 @@ export function PrdGenerateButton({
     }
   }
 
+  const isDisabled = disabled || loading || !issueIds || issueIds.length === 0
+
   return (
     <div className="inline-flex flex-col gap-1">
       <button
         onClick={handleGenerate}
-        disabled={disabled || loading || issueIds.length === 0}
+        disabled={isDisabled}
         className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
       >
         {loading ? (
@@ -66,7 +71,7 @@ export function PrdGenerateButton({
         )}
         {loading
           ? 'Generating...'
-          : issueIds.length > 1
+          : issueIds && issueIds.length > 1
             ? `${label} (${issueIds.length} issues)`
             : label}
       </button>
