@@ -98,7 +98,7 @@ The sync engine calls the provider, gets back `NormalizedItem[]`, and upserts in
 │  │            GitLab, Azure DevOps, Linear, Jira, ...)     │  │
 │  │                                                         │  │
 │  │  projects  project_phases  project_items                │  │
-│  │  project_history                                        │  │
+│  │  event_log                                              │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                                                              │
 │  ┌───────────────────────────────────────────────────────┐  │
@@ -573,7 +573,7 @@ export const projectItems = sqliteTable('project_items', {
   sortOrder: integer('sort_order').notNull().default(0),
   status: text('status')
     .notNull()
-    .$type<'pending' | 'in_progress' | 'integrated' | 'tested' | 'passed' | 'failed'>(),
+    .$type<'pending' | 'in_progress' | 'integrated' | 'tested' | 'passed' | 'failed' | 'on_hold'>(),
   prdId: text('prd_id').references(() => prds.id, { onDelete: 'set null' }),
   // For cross-project PRs: references the source project
   sourceProjectId: text('source_project_id'),
@@ -590,23 +590,176 @@ export const projectItems = sqliteTable('project_items', {
 
 **Cross-project references**: `sourceProjectId` and `sourceItemId` optionally link back to another project's item. Used when a PR item in Project B (v1.1) is created to merge work completed in Project A (hotfix v1.0). This preserves the lineage without breaking the "one item, one project" rule — the item still belongs only to Project B, but carries a pointer to its origin.
 
-Status flow: `pending → in_progress → integrated → tested → passed` (or `failed` at any point after `in_progress`).
+Status flow: `pending → in_progress → integrated → tested → passed` (or `failed` / `on_hold` at any point).
 
-#### `project_history`
+**`on_hold` status**: An item can be put on hold from `pending`, `in_progress`, or `integrated`. This pauses the item — it's excluded from gate advancement checks (a phase with held items can still advance if all non-held items are complete). Held items must be resolved (returned to their previous status or marked `failed`) before the project can be completed.
+
+#### `event_log` — Unified event log (replaces separate `project_history`)
+
+Instead of a project-specific history table, we use a single `event_log` table that serves all entity types — projects, agent sessions, builds, and future use cases. This is an evolution of the existing `agent_logs` table, generalized to support any entity.
 
 ```typescript
-export const projectHistory = sqliteTable('project_history', {
+export const eventLog = sqliteTable('event_log', {
   id: text('id').primaryKey(),
-  projectId: text('project_id')
+
+  // ─── Entity context — what is this event about? ───
+  entityType: text('entity_type')
     .notNull()
-    .references(() => projects.id, { onDelete: 'cascade' }),
-  action: text('action').notNull(),
-  targetType: text('target_type'),
-  targetId: text('target_id'),
+    .$type<'project' | 'prd' | 'build' | 'agent_session'>(),
+    // Future: 'item', 'release', 'repo', etc.
+  entityId: text('entity_id').notNull(),
+    // References the entity by its table's PK (projects.id, prds.id, etc.)
+    // Not a true FK — polymorphic, handled at app layer like the existing agent_logs.prd_id
+
+  // ─── Optional parent entity (for hierarchical events) ───
+  parentEntityType: text('parent_entity_type'),
+  parentEntityId: text('parent_entity_id'),
+    // e.g., a phase event has parent: { entityType: 'project', entityId: project.id }
+
+  // ─── Event classification ───
+  eventType: text('event_type').notNull(),
+    // Namespaced: '{domain}.{action}'
+    // Project: 'project.created', 'project.activated', 'phase.started',
+    //          'phase.passed', 'item.added', 'item.integrated', 'item.on_hold', ...
+    // Agent:   'agent.thinking', 'agent.tool_call', 'agent.tool_result',
+    //          'agent.output', 'agent.error', 'agent.status'
+    // Build:   'build.queued', 'build.started', 'build.completed', 'build.failed'
+
+  // ─── Session grouping (used by agent sessions, optional for projects) ───
+  sessionId: text('session_id'),
+    // For agent runs: 'prd-{prdId}-v{version}' or 'build-{prdId}-v{version}'
+    // For project integration runs: 'project-{projectId}-integrate-{itemId}'
+
+  // ─── Human-readable ───
   summary: text('summary'),
+    // One-line description: "Phase 'Bug Fixes' passed all gates"
+
+  // ─── Payload ───
+  content: text('content'),
+    // For agent events: thinking text, tool output, error message
+    // For project events: usually null (summary is sufficient)
   metadata: text('metadata'),
+    // JSON blob: { phaseId, itemId, buildJobId, prUrl, previousStatus, newStatus, ... }
+
   createdAt: text('created_at').notNull(),
 })
+```
+
+**Why one table instead of two:**
+
+| Aspect | Two tables (`agent_logs` + `project_history`) | One `event_log` |
+|--------|-----------------------------------------------|-----------------|
+| Query project history | `SELECT * FROM project_history WHERE project_id = ?` | `SELECT * FROM event_log WHERE entity_type = 'project' AND entity_id = ?` |
+| Query agent session | `SELECT * FROM agent_logs WHERE session_id = ?` | `SELECT * FROM event_log WHERE session_id = ?` |
+| Cross-entity timeline | UNION across tables with different columns | Single query: `WHERE entity_id IN (...)` |
+| Add new entity type | New table + new logger + new UI | New `entity_type` value, same logger, same UI |
+| UI components | Separate timeline components | One `EventTimeline` component, entity-aware rendering |
+
+**Migration path from existing `agent_logs`**: Not part of Phase 3.5 — the existing `agent_logs` table continues to work. Migration to the unified `event_log` is scoped as Phase 3.6c, which builds on the Events API (see [`36-event-logger-api.md`](36-event-logger-api.md)).
+
+#### `EventLogger` — Internal logger class
+
+**File: `apps/web/src/lib/event-logger.ts`** (new)
+
+A generalized version of the existing `SessionLogger`, usable by both agent runners and project operations:
+
+```typescript
+import { v4 as uuid } from 'uuid'
+import type { DbClient } from '@mobster/db'
+import { eventLog } from '@mobster/db'
+
+export type EntityType = 'project' | 'prd' | 'build' | 'agent_session'
+
+export class EventLogger {
+  private db: DbClient
+  private entityType: EntityType
+  private entityId: string
+  private parentEntityType?: EntityType
+  private parentEntityId?: string
+  private sessionId?: string
+
+  constructor(opts: {
+    db: DbClient
+    entityType: EntityType
+    entityId: string
+    parentEntityType?: EntityType
+    parentEntityId?: string
+    sessionId?: string
+  }) {
+    this.db = opts.db
+    this.entityType = opts.entityType
+    this.entityId = opts.entityId
+    this.parentEntityType = opts.parentEntityType
+    this.parentEntityId = opts.parentEntityId
+    this.sessionId = opts.sessionId
+  }
+
+  /** Core log method — everything flows through here */
+  log(eventType: string, opts?: {
+    summary?: string
+    content?: string
+    metadata?: Record<string, unknown>
+  }): void {
+    try {
+      this.db.insert(eventLog).values({
+        id: uuid(),
+        entityType: this.entityType,
+        entityId: this.entityId,
+        parentEntityType: this.parentEntityType ?? null,
+        parentEntityId: this.parentEntityId ?? null,
+        eventType,
+        sessionId: this.sessionId ?? null,
+        summary: opts?.summary ?? null,
+        content: opts?.content ?? null,
+        metadata: opts?.metadata ? JSON.stringify(opts.metadata) : null,
+        createdAt: new Date().toISOString(),
+      }).run()
+    } catch (err) {
+      console.error('EventLogger: failed to write event', err)
+    }
+  }
+}
+```
+
+**Usage for project events:**
+
+```typescript
+const logger = new EventLogger({ db, entityType: 'project', entityId: project.id })
+
+// Lifecycle
+logger.log('project.created', { summary: 'Project "Release v1.1" created' })
+logger.log('project.activated', { summary: 'Project activated', metadata: { previousStatus: 'draft' } })
+
+// Phases (parented to the project)
+const phaseLogger = new EventLogger({
+  db, entityType: 'project', entityId: phase.id,
+  parentEntityType: 'project', parentEntityId: project.id,
+})
+phaseLogger.log('phase.started', { summary: `Phase "${phase.name}" started` })
+phaseLogger.log('phase.passed', { summary: `Phase "${phase.name}" completed — all items integrated` })
+
+// Items
+logger.log('item.added', {
+  summary: `Bug #42 "Login crash" added to phase "Bug Fixes"`,
+  metadata: { itemId, phaseId, itemType: 'bug', origin: 'intake' },
+})
+logger.log('item.integrated', {
+  summary: `Bug #42 integrated successfully`,
+  metadata: { itemId, buildJobId, prUrl: 'https://github.com/...' },
+})
+```
+
+**Usage for agent sessions** (replaces current `SessionLogger` — future migration):
+
+```typescript
+const logger = new EventLogger({
+  db, entityType: 'agent_session', entityId: prdId,
+  sessionId: `prd-${prdId}-v${version}`,
+})
+
+logger.log('agent.thinking', { content: 'Let me explore the codebase first...' })
+logger.log('agent.tool_call', { summary: 'Calling read_file', metadata: { toolName: 'read_file', toolInput: {...} } })
+logger.log('agent.status', { summary: 'PRD generation started' })
 ```
 
 Common action values: `project_created`, `project_activated`, `project_completed`, `phase_created`, `phase_started`, `phase_passed`, `phase_failed`, `item_added`, `item_removed`, `item_integrated`, `item_failed`, `item_tested`, `bug_added`, `gate_checked`, `gate_failed`.
@@ -637,7 +790,7 @@ Append `CREATE TABLE IF NOT EXISTS` statements for all four new tables to the `S
 
 **File: `packages/db/src/index.ts`**
 
-Add exports for all new tables: `projects`, `projectPhases`, `projectItems`, `projectHistory`, `pullRequests`.
+Add exports for all new tables: `projects`, `projectPhases`, `projectItems`, `eventLog`.
 
 ### 1.5 Shared Types
 
@@ -654,11 +807,12 @@ export type PhaseType = (typeof PHASE_TYPES)[number]
 export const PHASE_STATUSES = ['pending', 'active', 'passed', 'failed'] as const
 export type PhaseStatus = (typeof PHASE_STATUSES)[number]
 
-export const ITEM_STATUSES = ['pending', 'in_progress', 'integrated', 'tested', 'passed', 'failed'] as const
-export type ItemStatus = (typeof ITEM_STATUSES)[number]
+export const PROJECT_ITEM_STATUSES = ['pending', 'in_progress', 'integrated', 'tested', 'passed', 'failed', 'on_hold'] as const
+export type ProjectItemStatus = (typeof PROJECT_ITEM_STATUSES)[number]
 
-// Note: ITEM_TYPES, ITEM_SOURCES, ITEM_SIZES, ITEM_STATUSES are defined
-// on the items table in Phase 0.8 — not repeated here.
+// Note: ITEM_TYPES, ITEM_SOURCES, ITEM_SIZES, ITEM_STATUSES (open/closed/merged/draft)
+// are defined on the items table in Phase 0.8. PROJECT_ITEM_STATUSES is the pipeline
+// status within a project phase — a separate concept from the item's own status.
 ```
 
 Zod schemas:
@@ -686,7 +840,7 @@ export const ProjectAddItemsInput = z.object({
 export const ProjectCreateItemInput = z.object({
   title: z.string().min(1).max(500),
   description: z.string().max(5000).optional(),
-  itemType: z.enum(['bug', 'feature', 'pull-request']),
+  itemType: z.enum(['bug', 'feature', 'pull_request', 'task']),
   phaseId: z.string().uuid(),
   sortOrder: z.number().int().min(0).optional(),
   // For cross-project PRs
@@ -710,7 +864,7 @@ export const ProjectPhaseUpdateInput = z.object({
 })
 
 export const ProjectItemUpdateInput = z.object({
-  status: z.enum(ITEM_STATUSES).optional(),
+  status: z.enum(PROJECT_ITEM_STATUSES).optional(),
   sortOrder: z.number().int().min(0).optional(),
 })
 ```
@@ -742,7 +896,7 @@ Every route follows the established pattern: `const session = await auth()` (401
 
 #### `api/projects/[id]/items/create/route.ts` (new)
 - **POST** — Create a new item directly within the project (no Intake source). Body validated with `ProjectCreateItemInput`.
-  - Creates a local placeholder record (in the `issues` table for bugs/features, or `pull_requests` table for PRs) with `origin: 'project'`
+  - Creates a record in the unified `items` table with `origin: 'project'` and the appropriate `itemType` (`bug`, `feature`, `pull_request`, or `task`)
   - Creates the `project_items` junction row pointing to the new record
   - For cross-project PRs with `sourceProjectId` set: stores the back-reference, resolves `sourceBranch` → `targetBranch` from the referenced project's completed integrations
   - Records history: `item_created_in_project`
@@ -758,7 +912,7 @@ Every route follows the established pattern: `const session = await auth()` (401
 
 ```typescript
 import type { DbClient } from '@mobster/db'
-import { projectPhases, projectItems, projectHistory } from '@mobster/db'
+import { projectPhases, projectItems } from '@mobster/db'
 import { eq, and } from 'drizzle-orm'
 import { v4 as uuid } from 'uuid'
 
@@ -773,7 +927,9 @@ export function canAdvancePhase(db: DbClient, phaseId: string): boolean {
   if (!phase) return false
 
   const items = db.select().from(projectItems).where(eq(projectItems.phaseId, phaseId)).all()
-  if (items.length === 0) return false
+  // Exclude on_hold items from gate checks — they're intentionally paused
+  const activeItems = items.filter((item) => item.status !== 'on_hold')
+  if (activeItems.length === 0) return false
 
   const terminalStatuses = {
     integration: ['integrated', 'tested', 'passed'],
@@ -782,7 +938,7 @@ export function canAdvancePhase(db: DbClient, phaseId: string): boolean {
   }
 
   const valid = terminalStatuses[phase.phaseType] || ['passed']
-  return items.every((item) => valid.includes(item.status))
+  return activeItems.every((item) => valid.includes(item.status))
 }
 
 /**
@@ -816,33 +972,11 @@ export function activateNextPhase(db: DbClient, projectId: string): void {
     .where(eq(projectPhases.id, next.id))
     .run()
 
-  recordHistory(db, projectId, 'phase_started', 'phase', next.id, `Phase "${next.name}" started`)
-}
-
-/**
- * Record a project history entry.
- */
-export function recordHistory(
-  db: DbClient,
-  projectId: string,
-  action: string,
-  targetType?: string,
-  targetId?: string,
-  summary?: string,
-  metadata?: Record<string, unknown>,
-): void {
-  db.insert(projectHistory)
-    .values({
-      id: uuid(),
-      projectId,
-      action,
-      targetType: targetType || null,
-      targetId: targetId || null,
-      summary: summary || null,
-      metadata: metadata ? JSON.stringify(metadata) : null,
-      createdAt: new Date().toISOString(),
-    })
-    .run()
+  const logger = new EventLogger({ db, entityType: 'project', entityId: projectId })
+  logger.log('phase.started', {
+    summary: `Phase "${next.name}" started`,
+    metadata: { phaseId: next.id },
+  })
 }
 ```
 
@@ -1051,8 +1185,50 @@ Displays projects as cards (not a table, since projects are higher-level entitie
 - Description (truncated)
 - Repo name
 - Progress: "2/3 phases complete"
-- Item count
+- **Stat bar**: four at-a-glance counts:
+  - 🏃 **Running**: active build jobs in this project
+  - 👁 **Needs review**: items with PRDs awaiting approval, or phases with pending gates
+  - ✓ **Done**: completed items across all phases
+  - ⏸ **On hold**: items in `on_hold` status
 - Relative time ("Updated 3 hours ago")
+
+These counts are computed server-side when listing projects. **For completed and archived projects, all stat queries are skipped** — the project is done, so the card simply shows "All items finished!" with zero queries:
+
+```typescript
+function getProjectStats(db: DbClient, project: { id: string; status: string }) {
+  // Skip all stat queries for finished projects
+  if (project.status === 'complete' || project.status === 'archived') {
+    return null  // Card renders "All items finished!" instead of stat bar
+  }
+
+  const running = db.select({ count: sql`count(*)` }).from(buildJobs)
+    .innerJoin(projectItems, eq(buildJobs.projectItemId, projectItems.id))
+    .where(and(eq(projectItems.projectId, project.id), eq(buildJobs.status, 'running')))
+    .get()?.count ?? 0
+
+  const needsReview = db.select({ count: sql`count(*)` }).from(projectItems)
+    .where(and(
+      eq(projectItems.projectId, project.id),
+      eq(projectItems.status, 'in_progress')
+    )).get()?.count ?? 0
+
+  const done = db.select({ count: sql`count(*)` }).from(projectItems)
+    .where(and(
+      eq(projectItems.projectId, project.id),
+      inArray(projectItems.status, ['integrated', 'tested', 'passed'])
+    )).get()?.count ?? 0
+
+  const onHold = db.select({ count: sql`count(*)` }).from(projectItems)
+    .where(and(
+      eq(projectItems.projectId, project.id),
+      eq(projectItems.status, 'on_hold')
+    )).get()?.count ?? 0
+
+  return { running, needsReview, done, onHold }
+}
+```
+
+**Performance note**: Most workspaces will have 1–2 active projects and many completed/archived ones. The early-return on finished projects means stats are only computed for the handful of active projects, keeping total queries low. For N projects with A active, this runs ~4A queries instead of ~4N.
 
 "New Project" button in the top-right opens `ProjectCreateDialog`.
 
@@ -1118,9 +1294,16 @@ export default async function ProjectDetailPage({
     return { ...phase, items: enrichedItems }
   }))
 
-  // 5. Fetch recent history
-  const history = db.select().from(projectHistory)
-    .where(eq(projectHistory.projectId, id))
+  // 5. Fetch recent events for this project
+  // Matches both: events directly on the project (entityType='project', entityId=<id>)
+  // AND events on child entities (phases, items) parented to this project
+  const history = db.select().from(eventLog)
+    .where(
+      or(
+        and(eq(eventLog.entityType, 'project'), eq(eventLog.entityId, id)),
+        and(eq(eventLog.parentEntityType, 'project'), eq(eventLog.parentEntityId, id)),
+      )
+    )
     .orderBy(/* createdAt desc */).limit(50).all()
 
   return (
@@ -1168,7 +1351,7 @@ All new client components:
 
 #### `ProjectAddItemDialog` — `components/project-add-item-dialog.tsx`
 - Modal with search input and filter tabs (Issues / PRs)
-- Fetches from `/api/issues` or `/api/pull-requests` based on active search tab
+- Fetches from `/api/items` with `itemType` filter (e.g., `?itemType=bug,feature,question,other` for issues, `?itemType=pull_request` for PRs)
 - Filters out items already in this project
 - Multi-select with checkboxes
 - "Add to Phase" button with phase selector dropdown
@@ -1193,10 +1376,18 @@ All new client components:
 - Modal: name, description, phase type selector (integration/testing/review), gate criteria textarea
 - POSTs to `/api/projects/[id]/phases`
 
-#### `ProjectHistoryTimeline` — `components/project-history-timeline.tsx`
-- Vertical timeline of history entries
-- Each entry: action icon (varies by action type), summary text, relative timestamp
-- Grouped by date ("Today", "Yesterday", "June 2, 2026")
+#### `EventTimeline` — `components/event-timeline.tsx`
+
+A reusable timeline component that renders `event_log` entries for any entity type. Designed to eventually replace both the project history timeline and the runner log viewer:
+
+- **Props**: `events: EventLogEntry[]`, `entityType: EntityType`, `groupByDate?: boolean`
+- **Rendering**: Each event shows an icon (varies by `eventType` prefix: `project.*`, `agent.*`, `build.*`), the `summary` text, and relative timestamp
+- **Collapsible detail**: Events with `content` or `metadata` can be expanded to show full details (reuses the collapsible pattern from `runner-log-viewer.tsx`)
+- **Date grouping**: Optional — groups events under "Today", "Yesterday", "June 2, 2026" headers
+- **Entity-aware icons**: Uses `FolderKanban` for project events, `Bot` for agent events, `Hammer` for build events
+- **Reusability**: The same component renders project history, agent session logs, and build job logs — only the `entityType` filter and query differ
+
+For Phase 3.5, the component is used for project timelines. The existing `runner-log-viewer.tsx` continues to use `agent_logs` directly until the migration is done (see backlog).
 
 #### `ProjectIntegrateButton` — `components/project-integrate-button.tsx`
 - Reuses the existing `IntegrateDialog` but passes `projectItemId`
@@ -1254,8 +1445,11 @@ export async function POST(
     .where(eq(projectItems.id, item.id))
     .run()
 
-  recordHistory(db, projectId, 'item_integration_started', 'item', item.id,
-    `Integration started for ${item.itemType}:${item.itemId}`)
+  const logger = new EventLogger({ db, entityType: 'project', entityId: projectId })
+  logger.log('item.integration_started', {
+    summary: `Integration started for item ${item.id}`,
+    metadata: { itemId: item.id, itemType: item.itemType },
+  })
 
   // Create build job (existing logic from api/prds/[id]/integrate/route.ts)
   // ... but with projectItemId set
@@ -1306,12 +1500,11 @@ if (buildJob.projectItemId) {
       .where(eq(projectItems.id, item.id))
       .run()
 
-    recordHistory(db, item.projectId,
-      buildJob.status === 'success' ? 'item_integrated' : 'item_failed',
-      'item', item.id,
-      `Integration ${buildJob.status === 'success' ? 'succeeded' : 'failed'} for ${item.itemType}:${item.itemId}`,
-      { buildJobId: buildJob.id, prUrl: buildJob.prUrl }
-    )
+    const logger = new EventLogger({ db, entityType: 'project', entityId: item.projectId })
+    logger.log(buildJob.status === 'success' ? 'item.integrated' : 'item.failed', {
+      summary: `Integration ${buildJob.status === 'success' ? 'succeeded' : 'failed'} for item ${item.id}`,
+      metadata: { itemId: item.id, buildJobId: buildJob.id, prUrl: buildJob.prUrl },
+    })
 
     // Check if phase can advance
     if (buildJob.status === 'success' && canAdvancePhase(db, item.phaseId)) {
@@ -1320,8 +1513,10 @@ if (buildJob.projectItemId) {
       const phase = db.select().from(projectPhases)
         .where(eq(projectPhases.id, item.phaseId)).get()
 
-      recordHistory(db, item.projectId, 'phase_passed', 'phase', item.phaseId,
-        `Phase "${phase?.name}" completed — all items integrated`)
+      logger.log('phase.passed', {
+        summary: `Phase "${phase?.name}" completed — all items integrated`,
+        metadata: { phaseId: item.phaseId },
+      })
 
       activateNextPhase(db, item.projectId)
     }
@@ -1340,27 +1535,6 @@ Accept an optional `projectItemId` prop. When provided:
 
 ---
 
-## Phase 5: Dashboard Update
-
-**File: `apps/web/src/app/page.tsx`**
-
-Add project stats cards alongside the existing repo and issue stats:
-
-```typescript
-// New queries:
-const activeProjects = db.select({ count: sql`count(*)` }).from(projects)
-  .where(eq(projects.status, 'active')).get()
-
-const projectsNeedingAttention = db.select({ count: sql`count(*)` }).from(projectItems)
-  .where(eq(projectItems.status, 'failed')).get()
-
-// In the JSX, add stat cards and a "Recent Projects" section
-```
-
-Quick-link buttons: "Go to Intake" → `/intake`, "View Projects" → `/projects`
-
----
-
 ## Migration Strategy
 
 ### Database
@@ -1372,8 +1546,9 @@ No existing data needs migration — all new tables start empty.
 ### Routes
 
 - `/inbox` → redirects to `/intake` (no data loss, just a URL change)
-- All existing `/api/issues/*` and `/api/prds/*` routes remain unchanged
-- New `/api/pull-requests/*`, `/api/projects/*` routes are purely additive
+- `/api/issues/*` continues to work (redirects to `/api/items?source=github&itemType=...`)
+- All `/api/prds/*` routes remain unchanged
+- New `/api/items/*` and `/api/projects/*` routes are purely additive
 
 ### No Breaking Changes
 
@@ -1398,7 +1573,7 @@ No existing data needs migration — all new tables start empty.
 | `components/project-create-dialog.tsx` | client | Modal to create a new project |
 | `components/project-phase-create-dialog.tsx` | client | Modal to create a new phase |
 | `components/project-integrate-button.tsx` | client | Integration trigger in project context |
-| `components/project-history-timeline.tsx` | client | Vertical audit log timeline |
+| `components/event-timeline.tsx` | client | Reusable event timeline for any entity type (project, agent, build). Renders `event_log` entries with icons, summaries, timestamps, collapsible details, and date grouping |
 
 ### Existing Components Modified
 
@@ -1440,6 +1615,58 @@ No existing data needs migration — all new tables start empty.
 
 ---
 
+---
+
+## Performance Considerations
+
+### Potential Bottleneck: Project Detail Page
+
+The project detail page (`/projects/[id]`) is the most query-heavy page in the system. In the naive implementation, it makes:
+
+```
+1 query:  Fetch project
+1 query:  Fetch repo info
+1 query:  Fetch all phases for project
+N queries: For each phase, fetch its project_items
+N×M queries: For each project_item, JOIN to items table for display data
+1 query:  Fetch history entries (last 50)
+```
+
+For a project with 3 phases and 4 items per phase, that's **1 + 1 + 1 + 3 + 12 = 18 queries**. For larger projects, this grows linearly.
+
+### Mitigation Strategy
+
+The plan is to implement this naively first, then measure. Several optimizations are available if needed:
+
+1. **Batch the item JOIN**: Instead of querying `items` once per `project_item`, collect all `itemId`s and do a single `WHERE id IN (...)` query. 12 queries → 1 query.
+
+2. **Single query with JOINs**: Drizzle supports joins — fetch `project_items` INNER JOIN `items` in one trip:
+   ```typescript
+   db.select().from(projectItems)
+     .innerJoin(items, eq(projectItems.itemId, items.id))
+     .where(eq(projectItems.phaseId, phaseId))
+   ```
+
+3. **Prefetch everything in one pass**: Fetch ALL project_items for the project in one query (across all phases), then group by `phaseId` in application code. This is 1 query instead of N.
+
+4. **React Streaming + Suspense**: The page can stream in phases progressively — Phase 1 renders immediately while Phase 2+3 data is still loading. Next.js App Router supports this natively with `loading.tsx` boundaries and `<Suspense>` per phase card.
+
+5. **History pagination**: The history timeline fetches the last 50 entries. For projects with extensive history, add cursor-based pagination ("Load more") instead of fetching everything.
+
+### What to Optimize and When
+
+| Scenario | Queries (naive) | Queries (optimized) | When to optimize |
+|----------|----------------|---------------------|-----------------|
+| Small project (3 phases, 12 items) | ~18 | ~5 | Don't optimize — this is fast enough |
+| Medium project (5 phases, 25 items) | ~32 | ~6 | Batch the item JOIN only |
+| Large project (8+ phases, 50+ items) | ~60+ | ~6 | Full optimization + streaming |
+
+**Decision**: Build it naively, test with real data, and only optimize if page load exceeds ~500ms. The existing roadmap Phase 4 already covers N+1 query elimination across the app — this page will be included in that sweep.
+
+**Backlog item**: See [`backlog.md`](backlog.md) → "Project Detail Page Performance Audit."
+
+---
+
 ## Verification
 
 ### Per-Phase Testing
@@ -1459,7 +1686,7 @@ No existing data needs migration — all new tables start empty.
 2. Create project: `curl -X POST /api/projects -H 'Content-Type: application/json' -d '{"name":"Test Release","repoId":"<id>"}'`
 3. List projects: `curl /api/projects`
 4. Create phase: `curl -X POST /api/projects/<id>/phases -d '{"name":"Bug Fixes","phaseType":"integration"}'`
-5. Add item: `curl -X POST /api/projects/<id>/items -d '{"items":[{"itemType":"issue","itemId":"<issue-id>","phaseId":"<phase-id>"}]}'`
+5. Add item: `curl -X POST /api/projects/<id>/items -d '{"items":[{"itemId":"<item-id>","phaseId":"<phase-id>"}]}'`
 6. Get detail: `curl /api/projects/<id>` — verify nested phases+items+history
 7. Test gate logic: manually set all items to `integrated`, call `canAdvancePhase` — verify returns true
 
@@ -1486,14 +1713,10 @@ No existing data needs migration — all new tables start empty.
 4. After integration completes, verify item status updated to `integrated`
 5. If it was the last item in the phase, verify phase auto-advances and next phase activates
 
-**Phase 5 (Dashboard):**
-1. Navigate to `/` — verify project stats cards render
-2. Verify quick-link buttons navigate correctly
-
 ### End-to-End Smoke Test
 
-1. Sync a repo → issues and PRs populate
-2. Go to Intake → verify both tabs show data
+1. Sync a repo → issues and PRs populate the unified `items` table
+2. Go to Intake → verify both tabs (Issues, PRs) show data from `/api/items`
 3. Create project "Test Release v1.0" for the synced repo
 4. Add 2 phases: "Bug Fixes" (integration) and "Polish" (review)
 5. Assign 2 bugs to Phase 1, 1 PR to Phase 2

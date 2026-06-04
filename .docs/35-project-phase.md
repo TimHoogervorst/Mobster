@@ -141,7 +141,7 @@ Items created in-project follow the **exact same lifecycle** as items pulled fro
 
 This is especially powerful for **cross-project pull requests**: when Project A (e.g., a hotfix for v1.0) completes and ships before Project B (v1.1), you can go into Project B and create a PR item: "Merge hotfix/v1.0 → main". This becomes a tracked, sequenced item within Project B's phases, flowing through review → integration → testing like everything else. The system preserves the full lineage — you can trace that this PR originated from Project A's work.
 
-Items within a phase have a **sort order** — you control which one fires first, second, third. Each item tracks its own status independently: `pending → in_progress → integrated → tested → passed` (or `failed`).
+Items within a phase have a **sort order** — you control which one fires first, second, third. Each item tracks its own status independently: `pending → in_progress → integrated → tested → passed (or failed, or on_hold)` (or `failed`).
 
 ### Item Size & Review Requirements
 
@@ -249,26 +249,19 @@ The overall flow from raw input to completed release:
 
 **Project Item**
 - Belongs to a project and a phase
-- **Origin**: `intake` (pulled from GitHub sync) or `project` (created directly in-project)
-- Polymorphic link: can point to an Issue, a Pull Request, or a PRD
+- **Origin**: `sync` (from GitHub), `manual` (created in Intake), or `project` (created in-project)
+- **Item reference**: Always points to `items.id` — a single FK, no polymorphism. The item's type, source, size, and status are all on the `items` table itself
 - Sort order within the phase
-- Status (pending → in_progress → integrated → tested → passed, or failed)
+- Status (pending → in_progress → integrated → tested → passed, or failed, or on_hold)
 - Optional link to the generated PRD (for issues)
 - **Cross-project reference**: optional `sourceProjectId` + `sourceItemId` linking back to another project's completed work (used when merging a hotfix project into an ongoing release project)
 - Timestamps
 
-**Project History**
-- Belongs to a project
-- Action type (phase_started, phase_passed, item_added, item_integrated, item_failed, bug_added, gate_checked, etc.)
-- Target reference (what phase/item was affected)
-- Human-readable summary
-- Optional metadata JSON
-- Timestamp
-
-**Pull Request** (new sync entity)
-- Mirrors the Issue table structure, adapted for PR-specific fields
-- Head branch, base branch, draft status, merged state
-- Local annotation fields (notes, tags)
+**Event Log** (unified — see [`36-event-logger-api.md`](36-event-logger-api.md))
+- Single `event_log` table serves all entity types (projects, PRDs, builds, agent sessions)
+- Namespaced event types: `project.created`, `phase.passed`, `item.integrated`, `agent.thinking`, etc.
+- Exposed as a REST API for external tools (custom runners, CI pipelines, dashboards)
+- Same logger used internally by project gates and integration runners
 
 ### Relationships
 
@@ -325,26 +318,65 @@ Key changes from current Inbox:
 ### Projects List Page (`/projects`)
 
 ```
-┌──────────────────────────────────────────────────┐
-│  Projects                        [+ New Project] │
-│                                                  │
-│  ┌──────────────────────────────────────────────┐│
-│  │ ● Active  Release v1.1                       ││
-│  │           main-repo  ·  2/3 phases complete   ││
-│  │           Updated 3 hours ago                 ││
-│  └──────────────────────────────────────────────┘│
-│  ┌──────────────────────────────────────────────┐│
-│  │ ○ Draft   Bug Bash Sprint                    ││
-│  │           side-project  ·  0 phases           ││
-│  │           Updated 1 day ago                   ││
-│  └──────────────────────────────────────────────┘│
-│  ┌──────────────────────────────────────────────┐│
-│  │ ✓ Complete  Release v1.0                     ││
-│  │           main-repo  ·  3/3 phases complete   ││
-│  │           Completed June 1, 2026              ││
-│  └──────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  Projects                                          [+ New Project]  │
+│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────────┐│
+│  │ ● Active  Release v1.1                                main-repo ││
+│  │           2/3 phases complete  ·  Updated 3 hours ago            ││
+│  │                                                                  ││
+│  │  🏃 2 running   👁 4 need review   ✓ 8 done   ⏸ 1 on hold      ││
+│  └──────────────────────────────────────────────────────────────────┘│
+│  ┌──────────────────────────────────────────────────────────────────┐│
+│  │ ○ Draft   Bug Bash Sprint                           side-project││
+│  │           0/2 phases  ·  Updated 1 day ago                       ││
+│  │                                                                  ││
+│  │  🏃 —   👁 —   ✓ —   ⏸ —                                       ││
+│  └──────────────────────────────────────────────────────────────────┘│
+│  ┌──────────────────────────────────────────────────────────────────┐│
+│  │ ✓ Complete  Release v1.0                              main-repo ││
+│  │            3/3 phases complete  ·  Completed June 1, 2026        ││
+│  │            All items finished!                                    ││
+│  └──────────────────────────────────────────────────────────────────┘│
+│  ┌──────────────────────────────────────────────────────────────────┐│
+│  │ 📦 Archived  Sprint 23 (old)                           side-repo││
+│  │             All items finished!  ·  Archived May 15, 2026        ││
+│  └──────────────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────────┘
 ```
+
+Each project card shows four at-a-glance indicators:
+
+| Indicator | What it counts | Source |
+|-----------|---------------|--------|
+| 🏃 **Running** | Active build jobs / agent runners in this project | `build_jobs` with `status = 'running'` and `projectItemId` linked to this project |
+| 👁 **Needs review** | Items with generated PRDs awaiting approval, or phases with pending gate checks | Project items with `status = 'in_progress'` (PRD ready, not yet integrated) |
+| ✓ **Done** | Items completed across all phases | Project items with `status = 'integrated' | 'tested' | 'passed'` |
+| ⏸ **On hold** | Items blocked or paused (new status — see below) | Project items with `status = 'on_hold'` |
+
+These indicators let you scan the project list and immediately see which projects need attention — runners are actively working, reviews are piling up, or things are blocked.
+
+For **completed** and **archived** projects, the stat bar is replaced with a simple "All items finished!" message. No queries for runners, reviews, or held items are executed — the project is done, so there's nothing left to count.
+
+### Item Status: `on_hold`
+
+A new item status for when work is intentionally paused:
+
+```
+pending ──→ in_progress ──→ integrated ──→ tested ──→ passed
+     │           │               │
+     │           └──→ on_hold ←──┘
+     │
+     └──→ failed
+```
+
+An item can be put `on_hold` from `pending`, `in_progress`, or `integrated`. Reasons include:
+- Waiting for an external dependency (another PR to merge first)
+- Blocked by a discovered bug that needs investigation
+- Deferred to a later phase
+- Waiting for user input (clarification needed from the issue reporter)
+
+Items `on_hold` are excluded from gate checks — a phase can still advance if all non-held items are complete. Held items must be resolved (returned to their previous status or moved to `failed`) before the project can be marked complete.
 
 ### Project Detail Page (`/projects/[id]`) — The Core
 
@@ -476,10 +508,10 @@ The work breaks down into 5 logical chunks, each delivering standalone value:
 
 | Step | What | Value Delivered |
 |------|------|-----------------|
-| **1. PR Syncing** | New `pull_requests` table, GitHub client extension, sync engine update, PR API route | PRs appear in the system, ready to be used anywhere |
-| **2. Project Data Model** | New tables (projects, phases, items, history), shared types, API routes (CRUD for all entities) | Projects can be created and managed via API |
-| **3. Intake Hub** | Rename `/inbox` → `/intake`, tab component, PR table + filters, sidebar update, redirect | Users see the multi-tab intake with Issues + PRs |
-| **4. Project Pages** | Project list page, detail page with phase cards, add-item dialog, history timeline | Full project management UI |
+| **1. Unified Items Table** | New `items` table (replaces separate issues/PRs), GitHub client normalization, sync engine update, `/api/items` endpoint | Issues and PRs live in one table — any source can plug in |
+| **2. Project Data Model** | New tables (projects, phases, items, event_log), shared types, API routes (CRUD for all entities) | Projects can be created and managed via API |
+| **3. Intake Hub** | Rename `/inbox` → `/intake`, unified item table + filters, sidebar update, redirect | Users see the multi-tab intake with Issues + PRs — both from the same `items` table |
+| **4. Project Pages** | Project list page, detail page with phase cards, add-item dialog, event timeline | Full project management UI |
 | **5. Project Integration** | Integration within project context, phase gate logic, build job → project item linking | End-to-end project execution flow |
 
 Each step can be tested and merged independently. Steps 1 and 2 have no UI dependencies and can be built in parallel.
@@ -492,7 +524,7 @@ This foundation enables several natural extensions:
 
 - **Project templates**: Define a standard phase structure for bug-fix releases vs. feature releases
 - **Release notes**: Auto-generate release notes from the project history
-- **Cross-repo projects**: A project that spans multiple repos (more complex, but the polymorphic item model supports it)
+- **Cross-repo projects**: A project that spans multiple repos (more complex, but the unified `items` table with per-repo source data supports it)
 - **Project metrics**: Cycle time (item added → integrated), integration success rate, bugs-discovered-during-testing count
 - **Scheduled integration**: Set a phase to auto-start integration at a specific time
 - **GitHub Projects sync**: Two-way sync with GitHub Projects for teams using both
