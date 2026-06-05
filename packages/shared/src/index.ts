@@ -28,6 +28,35 @@ export type IssueType = (typeof ISSUE_TYPES)[number]
 export const AGENT_PROVIDERS = ['claude-code', 'anthropic-sdk'] as const
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number]
 
+// ─── Phase 3.5: Items & Projects ─────────────────────
+
+export const ITEM_SOURCES = ['github', 'manual'] as const
+export type ItemSource = (typeof ITEM_SOURCES)[number]
+
+export const ITEM_ORIGINS = ['sync', 'manual', 'project'] as const
+export type ItemOrigin = (typeof ITEM_ORIGINS)[number]
+
+export const ITEM_SIZES = ['xs', 'small', 'medium', 'large', 'xl'] as const
+export type ItemSize = (typeof ITEM_SIZES)[number]
+
+export const ITEM_STATUSES = ['open', 'closed', 'merged', 'draft'] as const
+export type ItemStatus = (typeof ITEM_STATUSES)[number]
+
+export const ITEM_TYPES = ['bug', 'feature', 'pull_request', 'task', 'question', 'other'] as const
+export type ItemType = (typeof ITEM_TYPES)[number]
+
+export const PROJECT_STATUSES = ['draft', 'active', 'testing', 'complete', 'archived'] as const
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number]
+
+export const PHASE_TYPES = ['integration', 'testing', 'review'] as const
+export type PhaseType = (typeof PHASE_TYPES)[number]
+
+export const PHASE_STATUSES = ['pending', 'active', 'passed', 'failed'] as const
+export type PhaseStatus = (typeof PHASE_STATUSES)[number]
+
+export const PROJECT_ITEM_STATUSES = ['pending', 'in_progress', 'integrated', 'tested', 'passed', 'failed', 'on_hold'] as const
+export type ProjectItemStatus = (typeof PROJECT_ITEM_STATUSES)[number]
+
 // ─── API Schemas ─────────────────────────────────────
 
 export const PrdGenerateInput = z.object({
@@ -153,6 +182,77 @@ export const AddRepoByUrlInput = z.object({
     }),
 })
 
+// ─── Phase 3.5: Items & Projects Schemas ──────────────
+
+export const ItemUpdateInput = z.object({
+  userNotes: z.string().max(10000).optional(),
+  userTags: z.array(z.string().max(50)).max(10).optional(),
+  itemType: z.enum(ITEM_TYPES).optional(),
+  size: z.enum(ITEM_SIZES).optional(),
+  requiresReview: z.boolean().optional(),
+  reviewReason: z.string().max(500).optional(),
+})
+
+export const ItemCreateInput = z.object({
+  title: z.string().min(1).max(500),
+  description: z.string().max(5000).optional(),
+  itemType: z.enum(['bug', 'feature', 'pull_request', 'task']),
+  repoId: z.string().uuid(),
+  size: z.enum(ITEM_SIZES).optional(),
+  requiresReview: z.boolean().optional(),
+  reviewReason: z.string().max(500).optional(),
+})
+
+export const ProjectCreateInput = z.object({
+  name: z.string().min(1).max(500),
+  description: z.string().max(5000).optional(),
+  repoId: z.string().uuid(),
+})
+
+export const ProjectUpdateInput = z.object({
+  name: z.string().min(1).max(500).optional(),
+  description: z.string().max(5000).optional(),
+  status: z.enum(PROJECT_STATUSES).optional(),
+})
+
+export const ProjectAddItemsInput = z.object({
+  items: z.array(z.object({
+    itemId: z.string().uuid(),
+    phaseId: z.string().uuid(),
+    sortOrder: z.number().int().min(0).optional(),
+  })).min(1).max(50),
+})
+
+export const ProjectCreateItemInput = z.object({
+  title: z.string().min(1).max(500),
+  description: z.string().max(5000).optional(),
+  itemType: z.enum(['bug', 'feature', 'pull_request', 'task']),
+  phaseId: z.string().uuid(),
+  sortOrder: z.number().int().min(0).optional(),
+  sourceProjectId: z.string().uuid().optional(),
+  sourceBranch: z.string().optional(),
+  targetBranch: z.string().optional(),
+})
+
+export const ProjectPhaseCreateInput = z.object({
+  name: z.string().min(1).max(500),
+  description: z.string().optional(),
+  phaseType: z.enum(PHASE_TYPES),
+  gateCriteria: z.string().optional(),
+})
+
+export const ProjectPhaseUpdateInput = z.object({
+  name: z.string().min(1).max(500).optional(),
+  description: z.string().optional(),
+  status: z.enum(PHASE_STATUSES).optional(),
+  gateCriteria: z.string().optional(),
+})
+
+export const ProjectItemUpdateInput = z.object({
+  status: z.enum(PROJECT_ITEM_STATUSES).optional(),
+  sortOrder: z.number().int().min(0).optional(),
+})
+
 // ─── Type Exports ────────────────────────────────────
 
 export type PrdGenerateInput = z.infer<typeof PrdGenerateInput>
@@ -167,3 +267,12 @@ export type AgentUpdateInput = z.infer<typeof AgentUpdateInput>
 export type IssueUpdateInput = z.infer<typeof IssueUpdateInput>
 export type RepoSelectInput = z.infer<typeof RepoSelectInput>
 export type AddRepoByUrlInput = z.infer<typeof AddRepoByUrlInput>
+export type ItemUpdateInput = z.infer<typeof ItemUpdateInput>
+export type ItemCreateInput = z.infer<typeof ItemCreateInput>
+export type ProjectCreateInput = z.infer<typeof ProjectCreateInput>
+export type ProjectUpdateInput = z.infer<typeof ProjectUpdateInput>
+export type ProjectAddItemsInput = z.infer<typeof ProjectAddItemsInput>
+export type ProjectCreateItemInput = z.infer<typeof ProjectCreateItemInput>
+export type ProjectPhaseCreateInput = z.infer<typeof ProjectPhaseCreateInput>
+export type ProjectPhaseUpdateInput = z.infer<typeof ProjectPhaseUpdateInput>
+export type ProjectItemUpdateInput = z.infer<typeof ProjectItemUpdateInput>

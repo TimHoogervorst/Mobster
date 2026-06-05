@@ -1,7 +1,7 @@
 # Mobster — Master Plan
 
-**Last Updated:** 2026-06-03  
-**Current Phase:** Phase 3 (planned)  
+**Last Updated:** 2026-06-04  
+**Current Phase:** Phase 3.5 (planning) — Projects & Intake Hub  
 **License:** AGPL v3
 
 ---
@@ -19,23 +19,34 @@ Mobster is a self-hosted Docker-based web application that lets a developer conn
 ### Core Workflow
 
 ```
-GitHub Repos ──→ Issues/PRs ──→ Unified Inbox (UI)
+GitHub Repos ──→ Issues/PRs ──→ Intake Hub (UI)
                                     │
                               [User triages]
                                     │
-                              [Click "Generate PRD"]     ← Phase 2 ✅
-                                    │
-                              Agent drafts PRD
-                                    │
-                              [User reviews, edits, combines PRDs]
-                                    │
-                              [Click "Integrate"]         ← Phase 2 ✅
-                                    │
-                              Agent writes code
-                              Agent pushes to branch
-                              Agent opens GitHub PR
-                                    │
-                              [User reviews PR on GitHub]
+                         ┌──────────┴──────────┐
+                         │                     │
+                    [Add to Project]    [Quick PRD Gen]     ← Phase 2 ✅
+                         │                     │
+                         ▼                     ▼
+                    Project Board        Agent drafts PRD
+                    (phases + gates)          │
+                         │              [Review & approve]
+                    [Generate PRD]            │
+                         │              [Integrate]         ← Phase 2 ✅
+                         ▼                     │
+                    Agent drafts PRD     Agent writes code
+                         │              Agent pushes branch
+                    [Review & approve]  Agent opens GitHub PR
+                         │                     │
+                    [Integrate]          [User reviews on GH]
+                         │
+                    Agent writes code
+                    Agent pushes branch
+                    Agent opens GitHub PR
+                         │
+                    [Gate check: phase complete?]
+                         │
+                    [Next phase or project done]
 ```
 
 ---
@@ -97,6 +108,26 @@ GitHub Repos ──→ Issues/PRs ──→ Unified Inbox (UI)
 - **API Documentation**: Swagger UI at `/api-docs` with full OpenAPI 3.0 spec
 - **Workspace Management**: Bare-mirror cache for fast clones, clean workspace option for retries
 
+### Phase 3.5: Projects & Intake Hub 🔜 Planning
+
+Transform Mobster from a linear issue-to-PR pipeline into a **project-based release management tool** with two distinct spaces:
+
+- **Intake Hub** — A renamed/expanded Inbox with tabs for Issues and Pull Requests (and future sources). Everything from GitHub, unfiltered and unassigned. From here, items are triaged into projects.
+- **Projects** — A project represents a release or version (e.g., "v1.0", "Sprint 24"). It holds a sequenced plan of work organized into **phases** (integration, testing, review) with **gates** between them. Items flow through: pending → in_progress → integrated → tested → passed.
+
+**Key architectural change:** A unified `items` table replaces the source-specific `issues` table. All work — GitHub issues, GitHub PRs, manually created bugs/features, and future sources (GitLab, Jira, etc.) — lives in one table with a common schema. Source-specific details go into a `sourceData` JSON column. This eliminates polymorphic FKs and makes multi-source support trivial.
+
+**New entities:** `items`, `projects`, `project_phases`, `project_items`, `event_log` (unified event log replacing separate project history + future agent_logs migration)
+
+**Implementation steps** (each independently shippable):
+1. Unified Items Table — new `items` table, migration, sync engine update, `/api/items` endpoint
+2. Projects Data Model + API — new tables, CRUD routes, phase gate logic
+3. Intake Hub — rename `/inbox` → `/intake`, tabbed UI (Issues / PRs), redirect, sidebar update
+4. Project Pages — project list, project detail with phase cards, add-item dialogs, event timeline
+5. Project Integration — integration within project context, build job → project item linking, auto phase advancement
+
+See [35-project-phase.md](35-project-phase.md) (vision & product spec) and [35-project-phase-technical.md](35-project-phase-technical.md) (implementation details).
+
 ### Phase 3: UI Redesign & Branding 🔜 Planned
 - Redesign the UI to be more consistent across all pages
 - Add branding materials to make Mobster unique
@@ -116,7 +147,9 @@ GitHub Repos ──→ Issues/PRs ──→ Unified Inbox (UI)
 
 ## Data Model
 
-9 tables: `app_settings`, `users`, `github_repos`, `issues`, `prds`, `prd_issues`, `prd_comments`, `agents`, `agent_logs`, `build_jobs`
+**Current (Phase 2):** 10 tables: `app_settings`, `users`, `github_repos`, `issues`, `prds`, `prd_issues`, `prd_comments`, `agents`, `agent_logs`, `build_jobs`
+
+**Phase 3.5 adds:** `items` (unified work items — replaces `issues` long-term), `projects`, `project_phases`, `project_items`, `event_log` (unified event log)
 
 See [02-data-model.md](02-data-model.md) for full schema details.
 
@@ -133,6 +166,10 @@ mobster/
 │   ├── 03-phase-3-ui-redesign.md   ← Phase 3 plan
 │   ├── 04-phase-4-performance.md   ← Phase 4 plan
 │   ├── 05-v1-finalization.md       ← V1.0 finalization
+│   ├── 35-project-phase.md         ← Phase 3.5 vision & product spec
+│   ├── 35-project-phase-technical.md ← Phase 3.5 technical implementation
+│   ├── 36-event-logger-api.md      ← Events API & logger plan
+│   ├── roadmap.md                  ← V1.0 roadmap (1-month timeline)
 │   └── backlog.md                  ← Known issues for investigation
 ├── apps/web/                       ← Next.js application
 │   └── src/
@@ -152,7 +189,11 @@ mobster/
 
 - [Architecture](01-architecture.md) — Container design, request flows
 - [Data Model](02-data-model.md) — Full schema, state machines
+- [Phase 3.5: Projects & Intake Hub](35-project-phase.md) — Vision & product spec
+- [Phase 3.5: Technical Implementation](35-project-phase-technical.md) — Schema, API routes, components
+- [Events API & Logger](36-event-logger-api.md) — Unified event log and REST API
 - [Phase 3: UI Redesign](03-phase-3-ui-redesign.md) — Branding & consistency
 - [Phase 4: Performance](04-phase-4-performance.md) — Optimization & simplification
 - [V1.0 Finalization](05-v1-finalization.md) — Docker, docs, testing, security
+- [Roadmap](roadmap.md) — 1-month V1.0 launch timeline
 - [Backlog](backlog.md) — Known issues for investigation

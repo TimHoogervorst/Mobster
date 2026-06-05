@@ -8,7 +8,7 @@ import { ensureSchema } from '@mobster/db'
  * - Loads settings from DB into process.env
  * - Auto-generates AUTH_SECRET and ENCRYPTION_KEY if not present
  */
-export function initializeApp(): void {
+export async function initializeApp(): Promise<void> {
   const dbPath = process.env.DATABASE_PATH ?? './mobster.db'
 
   // Step 1: Ensure all tables exist
@@ -20,7 +20,17 @@ export function initializeApp(): void {
     throw error
   }
 
-  // Step 2: Open DB, load settings, generate secrets
+  // Step 2: Run one-shot migrations
+  try {
+    const { getDb } = await import('@/lib/db')
+    const db = getDb()
+    const { migrateIssuesToItems } = await import('@/lib/migrate-to-items')
+    migrateIssuesToItems(db)
+  } catch (error: any) {
+    console.warn('[startup] Migration check skipped:', error.message)
+  }
+
+  // Step 3: Open DB, load settings, generate secrets
   const sqlite = new Database(dbPath)
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('foreign_keys = ON')

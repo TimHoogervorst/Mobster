@@ -1,7 +1,8 @@
 # 01 — Architecture
 
 **Phase:** 0 (Foundation Setup) — **Complete**  
-**Last Updated:** 2026-05-29
+**Phase 3.5 additions:** Planned (see [35-project-phase-technical.md](35-project-phase-technical.md))  
+**Last Updated:** 2026-06-04
 
 ---
 
@@ -28,8 +29,15 @@ Mobster is a single-user, self-hosted web application packaged as a Docker conta
 │  │  App Router                                        │  │
 │  │  ├── / (dashboard)                                 │  │
 │  │  ├── /login (PAT entry)                            │  │
-│  │  ├── /inbox (issues list + filters)                │  │
+│  │  ├── /inbox → redirects to /intake                 │  │
+│  │  ├── /intake (Issues + PRs tabs)           ← 3.5   │  │
 │  │  ├── /issues/[id] (detail view)                    │  │
+│  │  ├── /projects (project list)              ← 3.5   │  │
+│  │  ├── /projects/[id] (phases + items)       ← 3.5   │  │
+│  │  ├── /prds (PRD list)                              │  │
+│  │  ├── /prds/[id] (PRD detail)                       │  │
+│  │  ├── /runners (build job monitor)                  │  │
+│  │  ├── /agents (agent config)                        │  │
 │  │  ├── /settings (repo config, sync)                 │  │
 │  │  └── /api/* (REST endpoints)                       │  │
 │  ├────────────────────────────────────────────────────┤  │
@@ -80,19 +88,32 @@ mobster/
 │       │   ├── layout.tsx
 │       │   ├── page.tsx              ← Dashboard
 │       │   ├── login/                ← PAT entry form
-│       │   ├── inbox/                ← Issue table + filters
+│       │   ├── inbox/                ← Redirect to /intake
+│       │   ├── intake/               ← ← 3.5: Issues + PRs tabs
 │       │   ├── issues/[id]/          ← Issue detail + annotations
+│       │   ├── projects/             ← ← 3.5: Project list + detail
+│       │   │   └── [id]/             ← Project board (phases + items)
+│       │   ├── prds/                 ← PRD list + detail
+│       │   ├── runners/              ← Build job monitor
+│       │   ├── agents/               ← Agent configuration
 │       │   ├── settings/             ← Repo management + sync
 │       │   └── api/
-│       │       ├── issues/           ← Issue CRUD
+│       │       ├── issues/           ← Issue CRUD (legacy, redirects to /api/items)
+│       │       ├── items/            ← ← 3.5: Unified items endpoint
+│       │       ├── projects/         ← ← 3.5: Projects CRUD
 │       │       └── repos/            ← Repo management + sync
 │       ├── components/               ← Shared UI components
 │       └── lib/
 │           ├── auth.ts               ← Custom JWT session (jose)
 │           ├── db.ts                 ← DB singleton + schema setup
-│           ├── github.ts             ← Octokit wrapper
+│           ├── github.ts             ← Octokit wrapper (→ GitHubProvider in 3.5)
 │           ├── startup.ts            ← Server startup init
-│           └── sync.ts               ← Issue sync engine
+│           ├── sync.ts               ← Unified issue + PR sync engine
+│           ├── migrate-to-items.ts   ← ← 3.5: issues → items migration
+│           ├── event-logger.ts       ← ← 3.5: Unified EventLogger class
+│           ├── project-gates.ts      ← ← 3.5: Phase gate logic
+│           └── providers/            ← ← 3.5: Source abstraction layer
+│               └── github-provider.ts
 ├── packages/
 │   ├── shared/src/
 │   │   ├── index.ts                  ← Types + Zod schemas

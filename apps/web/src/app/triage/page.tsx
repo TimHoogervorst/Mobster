@@ -1,10 +1,5 @@
-import { ComingSoon } from '@/components/coming-soon'
+import { redirect } from 'next/navigation'
 
-export default function TriagePage() {
-  return (
-    <ComingSoon
-      title="Triage"
-      description="AI-powered issue triage is coming soon."
-    />
-  )
+export default function TriageRedirect() {
+  redirect('/projects')
 }

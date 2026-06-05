@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
 import { getDb } from '@/lib/db'
-import { syncRepo } from '@/lib/sync'
+import { syncRepo, syncIssues, syncPullRequests } from '@/lib/sync'
 
 export async function POST(
   _request: Request,
@@ -16,8 +16,24 @@ export async function POST(
   const db = getDb()
 
   try {
-    const result = await syncRepo(db, session.accessToken, id)
-    return NextResponse.json(result)
+    // Legacy sync (writes to issues table — backward compat)
+    const legacyResult = await syncRepo(db, session.accessToken, id)
+
+    // Phase 3.5: also sync to unified items table
+    let issuesResult = null
+    let prsResult = null
+    try {
+      issuesResult = await syncIssues(db, session.accessToken, id)
+      prsResult = await syncPullRequests(db, session.accessToken, id)
+    } catch (err: any) {
+      console.warn('[sync] Unified items sync failed (non-fatal):', err.message)
+    }
+
+    return NextResponse.json({
+      legacy: legacyResult,
+      items: issuesResult,
+      pullRequests: prsResult,
+    })
   } catch (error: any) {
     if (error.message?.includes('Repo not found')) {
       return NextResponse.json({ error: 'Repo not found' }, { status: 404 })
