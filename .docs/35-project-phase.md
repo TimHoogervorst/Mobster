@@ -2,7 +2,8 @@
 
 > **Status:** Planning  
 > **Target:** Post-Phase 2, pre-V1.0  
-> **Depends on:** Phase 1 (GitHub Sync), Phase 2 (PRD + Integration)
+> **Depends on:** Phase 1 (GitHub Sync), Phase 2 (PRD + Integration)  
+> **Technical companion:** [35-project-phase-technical.md](35-project-phase-technical.md) — schema, API routes, component specs, migration strategy
 
 ---
 

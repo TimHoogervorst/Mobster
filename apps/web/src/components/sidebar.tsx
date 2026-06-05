@@ -8,7 +8,7 @@ import {
   Inbox,
   FileText,
   Activity,
-  Filter,
+  FolderKanban,
   Bot,
   Settings,
   BookOpen,
@@ -23,10 +23,10 @@ interface SidebarProps {
 const NAV_ITEMS = [
   { label: 'Dashboard', href: '/', icon: LayoutDashboard },
   { label: 'Repos', href: '/repos', icon: FolderGit2 },
-  { label: 'Inbox', href: '/inbox', icon: Inbox },
+  { label: 'Intake', href: '/intake', icon: Inbox },
+  { label: 'Projects', href: '/projects', icon: FolderKanban },
   { label: 'PRDs', href: '/prds', icon: FileText },
   { label: 'Runners', href: '/runners', icon: Activity },
-  { label: 'Triage', href: '/triage', icon: Filter },
   { label: 'Agents', href: '/agents', icon: Bot },
   { label: 'Settings', href: '/settings', icon: Settings },
 ]

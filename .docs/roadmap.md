@@ -10,17 +10,20 @@
 
 ---
 
-### 1. GitHub DevOps Integration (Inbox ↔ PRs)
+### 1. GitHub DevOps Integration (Intake Hub + Unified Items)
 
 Connect the inbox to the full GitHub development lifecycle, not just issues.
 
-- [ ] **Issue ↔ PR linking** — when a PR references an issue (`Closes #123`), show the linked PR status in the inbox and issue detail
-- [ ] **PR status tracking** — sync open PRs alongside issues, show CI check status (green/red/pending), review state (approved/changes requested)
+> **📋 Implementation plan:** Phase 3.5 ([35-project-phase.md](35-project-phase.md) + [35-project-phase-technical.md](35-project-phase-technical.md)) covers the Intake Hub (tabbed Issues/PRs view), the unified `items` table, and PR syncing. This roadmap item is the motivation; Phase 3.5 is the execution plan.
+
+- [ ] **Unified `items` table** — single table for issues, PRs, manual items, and future sources. Normalized schema with `sourceData` JSON for source-specific fields.
+- [ ] **PR syncing** — sync open PRs alongside issues into the unified `items` table, show CI check status (green/red/pending), review state (approved/changes requested)
+- [ ] **Intake Hub** — rename Inbox → Intake, tabbed view (Issues / Pull Requests), "Add to Project" bulk action
 - [ ] **GitHub Actions visibility** — show workflow run status per repo, surface failing runs in the dashboard
 - [ ] **Branch awareness** — show active branches per repo, which issues/PRDs are tied to which branches
 - [ ] **Unified activity feed** — `issues + PRs + CI runs + agent builds` in one chronological view with filtering
 
-**Why:** The inbox today is issues-only. Real development involves PRs, CI, and branches. The inbox should be a command center, not a list.
+**Why:** The inbox today is issues-only. Real development involves PRs, CI, and branches. The Intake Hub becomes a command center, not just a list.
 
 ---
 
@@ -100,24 +103,26 @@ The current dashboard is three stat cards. Make it a real operations center.
 
 ---
 
-### 6. Epic Planning & Workflow System
+### 6. Project-Based Release Management
 
-Move beyond single-issue PRDs. Let users plan larger units of work with structured workflows.
+Move beyond single-issue PRDs. Let users plan releases with structured phases and gates.
 
-**Epics:**
-- [ ] **Epic entity** — group multiple PRDs under an Epic (title, description, status, priority, target release/milestone)
-- [ ] **Epic board** — kanban-style view: Backlog → Specified (PRD ready) → In Progress (agent working) → In Review (PR open) → Done (merged)
-- [ ] **PRD → Epic linking** — assign existing PRDs to epics, or create PRDs directly within an epic
-- [ ] **Milestone sync** — optionally sync epics to GitHub Milestones
+> **📋 Implementation plan:** Phase 3.5 ([35-project-phase.md](35-project-phase.md) + [35-project-phase-technical.md](35-project-phase-technical.md)) implements this as **Projects** (not "Epics" — the terminology was unified). Projects are release containers with ordered phases, gate criteria, and sequenced work items.
 
-**Workflow engine:**
-- [ ] **Workflow definition** — define a sequence: `Generate PRD → User Approval → Integrate (Code) → Code Review → CI Pass → Merge`
+**Projects:**
+- [ ] **Project entity** — a release/version container (title, description, status, repo). Represents "v1.0", "Sprint 24", or "Q3 Bug Bash"
+- [ ] **Phases with gates** — ordered phases (integration / testing / review) with gate criteria between them. A phase auto-advances when all items complete and gate criteria pass
+- [ ] **Item sequencing** — drag-to-reorder items within a phase. Items flow: pending → in_progress → integrated → tested → passed
+- [ ] **In-project item creation** — add new bugs/features/PRs directly to a phase (not everything needs to come through Intake first)
+- [ ] **Cross-project PRs** — create a PR item in Project B that merges work completed in Project A (e.g., hotfix → main release)
+
+**Workflow engine (future — post V1.0):**
 - [ ] **Automated transitions** — when CI passes, auto-request PR review. When review approved, auto-merge (if user enables it)
-- [ ] **Code review stage** — after integration opens a PR, another agent reviews the diff and posts inline comments. User approves, agent addresses feedback, re-pushes
-- [ ] **Workflow run page** — visual timeline of where an epic/workflow is (like a CI pipeline visualization)
-- [ ] **Branch tracking per epic** — all integration branches for an epic tracked together, with merge status
+- [ ] **Code review stage** — after integration opens a PR, another agent reviews the diff and posts inline comments
+- [ ] **Project templates** — pre-defined phase structures: "Bug Fix Release", "Feature Sprint"
+- [ ] **Release notes auto-generation** — generate release notes from project history
 
-**Why this matters:** Single-issue PRDs are great for small fixes. But real software work spans multiple issues and PRs. Epics make Mobster a planning tool, not just a codegen tool.
+**Why this matters:** Single-issue PRDs are great for small fixes. But real software work spans multiple issues and PRs across multiple phases. Projects make Mobster a release management tool, not just a codegen tool.
 
 ---
 

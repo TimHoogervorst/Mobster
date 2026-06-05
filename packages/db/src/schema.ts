@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core'
+import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core'
 
 // ─── App Settings ─────────────────────────────────────
 
@@ -167,8 +167,162 @@ export const buildJobs = sqliteTable('build_jobs', {
   retryCount: integer('retry_count').notNull().default(0),
   maxRetries: integer('max_retries').notNull().default(3),
   testResults: text('test_results'),
+  projectItemId: text('project_item_id'),
   startedAt: text('started_at'),
   completedAt: text('completed_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
+})
+
+// ─── Items (Phase 3.5 — unified work items table) ────
+
+export const items = sqliteTable('items', {
+  id: text('id').primaryKey(),
+
+  // Core identity
+  title: text('title').notNull(),
+  description: text('description'),
+  itemType: text('item_type')
+    .notNull()
+    .$type<'bug' | 'feature' | 'pull_request' | 'task' | 'question' | 'other'>(),
+
+  // State
+  status: text('status')
+    .notNull()
+    .$type<'open' | 'closed' | 'merged' | 'draft'>(),
+
+  // Source abstraction
+  source: text('source')
+    .notNull()
+    .$type<'github' | 'manual'>(),
+  sourceId: text('source_id'),
+  sourceUrl: text('source_url'),
+  sourceData: text('source_data'),
+
+  // Classification
+  size: text('size').$type<'xs' | 'small' | 'medium' | 'large' | 'xl'>(),
+  requiresReview: integer('requires_review').notNull().default(1),
+  reviewReason: text('review_reason'),
+
+  // Repo association
+  repoId: text('repo_id')
+    .notNull()
+    .references(() => githubRepos.id, { onDelete: 'cascade' }),
+
+  // Denormalized common fields
+  number: integer('number'),
+  labels: text('labels'),
+  assignee: text('assignee'),
+  author: text('author'),
+  milestone: text('milestone'),
+
+  // PR-specific (nullable)
+  headBranch: text('head_branch'),
+  baseBranch: text('base_branch'),
+  isDraft: integer('is_draft').default(0),
+
+  // GitHub-specific denormalized
+  githubId: integer('github_id'),
+  githubCreatedAt: text('github_created_at'),
+  githubUpdatedAt: text('github_updated_at'),
+
+  // Local annotations
+  userNotes: text('user_notes'),
+  userTags: text('user_tags'),
+
+  // Origin tracking
+  origin: text('origin')
+    .notNull()
+    .$type<'sync' | 'manual' | 'project'>(),
+
+  // Timestamps
+  syncedAt: text('synced_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// ─── Projects (Phase 3.5) ────────────────────────────
+
+export const projects = sqliteTable('projects', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  status: text('status')
+    .notNull()
+    .$type<'draft' | 'active' | 'testing' | 'complete' | 'archived'>(),
+  repoId: text('repo_id')
+    .notNull()
+    .references(() => githubRepos.id, { onDelete: 'cascade' }),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// ─── Project Phases (Phase 3.5) ──────────────────────
+
+export const projectPhases = sqliteTable('project_phases', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  phaseType: text('phase_type')
+    .notNull()
+    .$type<'integration' | 'testing' | 'review'>(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  status: text('status')
+    .notNull()
+    .$type<'pending' | 'active' | 'passed' | 'failed'>(),
+  gateCriteria: text('gate_criteria'),
+  startedAt: text('started_at'),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// ─── Project Items (Phase 3.5) ───────────────────────
+
+export const projectItems = sqliteTable('project_items', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id')
+    .notNull()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  phaseId: text('phase_id')
+    .notNull()
+    .references(() => projectPhases.id, { onDelete: 'cascade' }),
+  itemId: text('item_id')
+    .notNull()
+    .references(() => items.id, { onDelete: 'cascade' }),
+  sortOrder: integer('sort_order').notNull().default(0),
+  status: text('status')
+    .notNull()
+    .$type<'pending' | 'in_progress' | 'integrated' | 'tested' | 'passed' | 'failed' | 'on_hold'>(),
+  prdId: text('prd_id').references(() => prds.id, { onDelete: 'set null' }),
+  sourceProjectId: text('source_project_id'),
+  sourceItemId: text('source_item_id'),
+  addedAt: text('added_at').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+// ─── Event Log (Phase 3.5 — unified event log) ───────
+
+export const eventLog = sqliteTable('event_log', {
+  id: text('id').primaryKey(),
+
+  entityType: text('entity_type')
+    .notNull()
+    .$type<'project' | 'prd' | 'build' | 'agent_session'>(),
+  entityId: text('entity_id').notNull(),
+
+  parentEntityType: text('parent_entity_type'),
+  parentEntityId: text('parent_entity_id'),
+
+  eventType: text('event_type').notNull(),
+  sessionId: text('session_id'),
+  summary: text('summary'),
+  content: text('content'),
+  metadata: text('metadata'),
+
+  createdAt: text('created_at').notNull(),
 })

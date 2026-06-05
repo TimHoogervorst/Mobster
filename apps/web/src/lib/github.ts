@@ -28,6 +28,48 @@ export interface GitHubIssue {
   githubUpdatedAt: string
 }
 
+export interface GitHubPullRequest {
+  githubId: number
+  number: number
+  title: string
+  body: string | null
+  state: 'open' | 'closed'
+  isDraft: boolean
+  isMerged: boolean
+  labels: string[]
+  assignee: string | null
+  author: string | null
+  milestone: string | null
+  headBranch: string
+  baseBranch: string
+  githubUrl: string
+  githubCreatedAt: string
+  githubUpdatedAt: string
+  mergedAt: string | null
+}
+
+export interface NormalizedItem {
+  title: string
+  description: string | null
+  itemType: 'bug' | 'feature' | 'pull_request' | 'task' | 'question' | 'other'
+  status: 'open' | 'closed' | 'merged' | 'draft'
+  source: 'github'
+  sourceId: string
+  sourceUrl: string
+  sourceData: Record<string, unknown>
+  number: number
+  labels: string[]
+  assignee: string | null
+  author: string | null
+  milestone: string | null
+  headBranch: string | null
+  baseBranch: string | null
+  isDraft: boolean
+  githubId: number
+  githubCreatedAt: string
+  githubUpdatedAt: string
+}
+
 export interface GitHubUser {
   login: string
   name: string | null
@@ -246,15 +288,15 @@ export function createGitHubClient(accessToken: string) {
     },
 
     /**
-     * List issues for a repository.
+     * List issues for a repository, returning normalized items.
      * If `since` is provided, only return issues updated after that date (incremental sync).
      */
     async listIssues(
       owner: string,
       repo: string,
       since?: Date,
-    ): Promise<GitHubIssue[]> {
-      const issues: GitHubIssue[] = []
+    ): Promise<NormalizedItem[]> {
+      const result: NormalizedItem[] = []
       const iterator = octokit.paginate.iterator(octokit.rest.issues.listForRepo, {
         owner,
         repo,
@@ -269,26 +311,133 @@ export function createGitHubClient(accessToken: string) {
         for (const issue of data) {
           // Skip pull requests (GitHub API returns PRs as issues)
           if (issue.pull_request) continue
-
-          issues.push({
-            githubId: issue.id,
-            number: issue.number,
-            title: issue.title,
-            body: issue.body ?? null,
-            state: issue.state as 'open' | 'closed',
-            labels: issue.labels.map((l) =>
-              typeof l === 'string' ? l : l.name ?? '',
-            ).filter(Boolean),
-            assignee: issue.assignee?.login ?? null,
-            milestone: issue.milestone?.title ?? null,
-            githubUrl: issue.html_url,
-            githubCreatedAt: issue.created_at,
-            githubUpdatedAt: issue.updated_at,
-          })
+          result.push(normalizeIssue(issue))
         }
       }
 
-      return issues
+      return result
     },
+
+    /**
+     * List pull requests for a repository, returning normalized items.
+     */
+    async listPullRequests(
+      owner: string,
+      repo: string,
+      since?: Date,
+    ): Promise<NormalizedItem[]> {
+      const result: NormalizedItem[] = []
+      const iterator = octokit.paginate.iterator(octokit.rest.pulls.list, {
+        owner,
+        repo,
+        state: 'all',
+        sort: 'updated',
+        direction: 'desc',
+        per_page: 100,
+      })
+
+      for await (const { data } of iterator) {
+        for (const pr of data) {
+          result.push(normalizePullRequest(pr))
+        }
+      }
+
+      return result
+    },
+  }
+}
+
+// ─── Normalization Helpers ──────────────────────────
+
+const LABEL_TYPE_MAP: Record<string, 'bug' | 'feature' | 'question'> = {
+  bug: 'bug',
+  feature: 'feature',
+  enhancement: 'feature',
+  question: 'question',
+  discussion: 'question',
+}
+
+function classifyIssueType(labels: string[]): 'bug' | 'feature' | 'question' | 'other' {
+  const lowerLabels = labels.map((l) => l.toLowerCase())
+  for (const label of lowerLabels) {
+    for (const [pattern, type] of Object.entries(LABEL_TYPE_MAP)) {
+      if (label.includes(pattern)) {
+        return type
+      }
+    }
+  }
+  return 'other'
+}
+
+function normalizeIssue(issue: any): NormalizedItem {
+  const labels: string[] = (issue.labels || [])
+    .map((l: any) => (typeof l === 'string' ? l : l.name ?? ''))
+    .filter(Boolean)
+
+  return {
+    title: issue.title,
+    description: issue.body ?? null,
+    itemType: classifyIssueType(labels),
+    status: issue.state as 'open' | 'closed',
+    source: 'github',
+    sourceId: String(issue.id),
+    sourceUrl: issue.html_url,
+    sourceData: {
+      githubId: issue.id,
+      issueNumber: issue.number,
+      stateReason: issue.state_reason ?? null,
+      reactions: issue.reactions ?? null,
+      commentsCount: issue.comments ?? 0,
+    },
+    number: issue.number,
+    labels,
+    assignee: issue.assignee?.login ?? null,
+    author: issue.user?.login ?? null,
+    milestone: issue.milestone?.title ?? null,
+    headBranch: null,
+    baseBranch: null,
+    isDraft: false,
+    githubId: issue.id,
+    githubCreatedAt: issue.created_at,
+    githubUpdatedAt: issue.updated_at,
+  }
+}
+
+function normalizePullRequest(pr: any): NormalizedItem {
+  const labels: string[] = (pr.labels || [])
+    .map((l: any) => (typeof l === 'string' ? l : l.name ?? ''))
+    .filter(Boolean)
+
+  const isMerged = pr.merged_at != null
+  const status: NormalizedItem['status'] = isMerged ? 'merged' : pr.state === 'closed' ? 'closed' : pr.draft ? 'draft' : 'open'
+
+  return {
+    title: pr.title,
+    description: pr.body ?? null,
+    itemType: 'pull_request',
+    status,
+    source: 'github',
+    sourceId: String(pr.id),
+    sourceUrl: pr.html_url,
+    sourceData: {
+      githubId: pr.id,
+      prNumber: pr.number,
+      mergedAt: pr.merged_at ?? null,
+      additions: pr.additions ?? 0,
+      deletions: pr.deletions ?? 0,
+      changedFiles: pr.changed_files ?? 0,
+      mergeCommitSha: pr.merge_commit_sha ?? null,
+    },
+    number: pr.number,
+    labels,
+    assignee: pr.assignee?.login ?? null,
+    author: pr.user?.login ?? null,
+    milestone: pr.milestone?.title ?? null,
+    headBranch: pr.head?.ref ?? null,
+    baseBranch: pr.base?.ref ?? null,
+    isDraft: pr.draft ?? false,
+    githubId: pr.id,
+    githubCreatedAt: pr.created_at,
+    githubUpdatedAt: pr.updated_at,
   }
 }

@@ -5,6 +5,7 @@ import * as schema from './schema'
 export { schema }
 export * from './schema'
 export { ensureSchema } from './ensure-schema'
+export { SCHEMA_DDL } from './schema-ddl'
 
 export function createDb(dbPath: string) {
   const sqlite = new Database(dbPath)

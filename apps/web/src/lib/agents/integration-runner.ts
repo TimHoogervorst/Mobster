@@ -5,7 +5,7 @@ import { join } from 'path'
 import { v4 as uuid } from 'uuid'
 import { eq, inArray, desc } from 'drizzle-orm'
 import type { DbClient } from '@mobster/db'
-import { prds, prdIssues, issues, githubRepos, agents, buildJobs } from '@mobster/db'
+import { prds, prdIssues, issues, githubRepos, agents, buildJobs, projectItems } from '@mobster/db'
 import { createAgentRunner } from './factory'
 import { buildIntegrationPrompt } from './integration-template'
 import { prepareWorkspace } from './workspace'
@@ -479,6 +479,9 @@ export async function integratePrd(
     logger.status(
       `Integration complete${prUrl ? ` — PR: ${prUrl}` : ''}${testResults ? ` — Tests captured` : ''}`,
     )
+
+    // Phase 3.5: Update project item if this build is part of a project
+    await handleProjectItemUpdate(db, buildJobId, 'success')
   } catch (error: any) {
     console.error(`[integration-runner] Failed for PRD ${prdId}:`, error.message)
 
@@ -518,6 +521,9 @@ export async function integratePrd(
       })
       .where(eq(prds.id, prdId))
       .run()
+
+    // Phase 3.5: Update project item status on failure
+    await handleProjectItemUpdate(db, buildJobId, 'failed')
   }
 }
 
@@ -545,5 +551,71 @@ function parseLabels(labels: string | null): string[] {
     return JSON.parse(labels)
   } catch {
     return []
+  }
+}
+
+/**
+ * Phase 3.5: After a build job completes (success or failure), update the
+ * linked project item and check if the phase can advance.
+ */
+async function handleProjectItemUpdate(
+  db: DbClient,
+  buildJobId: string,
+  outcome: 'success' | 'failed',
+): Promise<void> {
+  try {
+    const buildJob = db
+      .select()
+      .from(buildJobs)
+      .where(eq(buildJobs.id, buildJobId))
+      .get()
+
+    if (!buildJob?.projectItemId) return
+
+    const pi = db
+      .select()
+      .from(projectItems)
+      .where(eq(projectItems.id, buildJob.projectItemId))
+      .get()
+
+    if (!pi) return
+
+    const newStatus = outcome === 'success' ? 'integrated' : 'failed'
+    const now = new Date().toISOString()
+
+    db.update(projectItems)
+      .set({ status: newStatus, updatedAt: now })
+      .where(eq(projectItems.id, pi.id))
+      .run()
+
+    // Log the event
+    const { EventLogger } = await import('@/lib/event-logger')
+    const logger = new EventLogger({
+      db,
+      entityType: 'project' as any,
+      entityId: pi.projectId,
+    })
+    logger.log(outcome === 'success' ? 'item.integrated' : 'item.failed', {
+      summary: `Integration ${outcome === 'success' ? 'succeeded' : 'failed'} for project item`,
+      metadata: {
+        itemId: pi.id,
+        buildJobId,
+        prUrl: buildJob.prUrl,
+        phaseId: pi.phaseId,
+      },
+    })
+
+    // Check if phase can advance
+    if (outcome === 'success') {
+      const { canAdvancePhase, advancePhase, activateNextPhase } =
+        await import('@/lib/project-gates')
+
+      if (canAdvancePhase(db, pi.phaseId)) {
+        advancePhase(db, pi.phaseId)
+        activateNextPhase(db, pi.projectId)
+      }
+    }
+  } catch (err) {
+    console.error('[integration-runner] Failed to update project item:', err)
   }
 }
